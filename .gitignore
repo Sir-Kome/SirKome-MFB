@@ -1,0 +1,57 @@
+# -------------------------------
+# Python
+# -------------------------------
+.venv/
+.venv-1/
+venv/
+__pycache__/
+*.py[cod]
+*.db
+*.sqlite3
+.pytest_cache/
+
+# Environment files
+.env
+.env.*
+.env.local
+.env.development.local
+.env.production.local
+.env.test.local
+
+# Sensitive local config / secrets
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+*.token
+*.secret
+secrets.*
+secrets.json
+config.local.*
+local_settings.py
+backend/local_settings.py
+frontend/.env.local
+
+# -------------------------------
+# React / Vite
+# -------------------------------
+frontend/node_modules/
+frontend/dist/
+frontend/build/
+
+# -------------------------------
+# VS Code
+# -------------------------------
+.vscode/
+
+# -------------------------------
+# Operating System
+# -------------------------------
+Thumbs.db
+.DS_Store
+
+# -------------------------------
+# Logs
+# -------------------------------
+*.log

@@ -1,0 +1,137 @@
+import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+
+import api from '../services/api';
+
+function Register() {
+  const navigate = useNavigate();
+  const [form, setForm] = useState({
+    name: '',
+    email: '',
+    password: '',
+    phone: '',
+    nin: '',
+    bvn: '',
+    pin: '',
+    pin_confirmation: '',
+  });
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const handleChange = (event) => {
+    const { name, value } = event.target;
+    const sanitizedValue = name === 'nin' || name === 'bvn'
+      ? value.replace(/\D/g, '').slice(0, 11)
+      : name === 'pin' || name === 'pin_confirmation'
+        ? value.replace(/\D/g, '').slice(0, 4)
+        : value;
+    setForm((current) => ({ ...current, [name]: sanitizedValue }));
+  };
+
+  const validateIdentity = (value) => /^\d{11}$/.test(value);
+
+  const handleSubmit = async (event) => {
+    event.preventDefault();
+    setLoading(true);
+    setError('');
+
+    if (!validateIdentity(form.nin) || !validateIdentity(form.bvn) || !/^\d{4}$/.test(form.pin)) {
+      setError('NIN and BVN must each be exactly 11 digits, and PIN must be exactly 4 digits.');
+      setLoading(false);
+      return;
+    }
+
+    if (form.pin !== form.pin_confirmation) {
+      setError('The transfer PINs do not match.');
+      setLoading(false);
+      return;
+    }
+
+    try {
+      const registrationData = { ...form };
+      delete registrationData.pin_confirmation;
+      const response = await api.post('/auth/register', registrationData);
+      const { token, user } = response.data;
+      localStorage.setItem('sirkome_token', token);
+      localStorage.setItem('sirkome_user', JSON.stringify(user));
+      navigate('/dashboard');
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Unable to create account');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(34,211,238,0.2),_transparent_30%),linear-gradient(135deg,_#f4f7ff_0%,_#eef2ff_100%)] px-4 py-6 text-slate-800 sm:px-6 lg:px-8">
+      <div className="mx-auto flex min-h-[calc(100vh-3rem)] max-w-5xl flex-col overflow-hidden rounded-[32px] border border-white/70 bg-white/80 shadow-2xl backdrop-blur lg:flex-row">
+        <div className="flex flex-1 flex-col justify-center bg-gradient-to-br from-slate-950 via-slate-900 to-violet-950 p-8 text-white sm:p-10 lg:p-14">
+          <p className="text-sm font-medium uppercase tracking-[0.3em] text-cyan-400">Open an account</p>
+          <h1 className="mt-3 text-3xl font-semibold sm:text-4xl">Create a new SirKome Bank customer profile</h1>
+          <p className="mt-4 max-w-md text-base text-slate-300">
+            Register a new user and use the admin account to transfer funds into their account for a complete demo.
+          </p>
+        </div>
+
+        <div className="flex flex-1 items-center justify-center p-6 sm:p-8 lg:p-10">
+          <form onSubmit={handleSubmit} className="w-full max-w-xl rounded-[28px] border border-slate-200 bg-white p-6 shadow-lg sm:p-8">
+            <p className="text-sm font-medium uppercase tracking-[0.3em] text-cyan-600">Sign up</p>
+            <h2 className="mt-2 text-2xl font-semibold text-slate-900">Create your bank account</h2>
+
+            <label className="mt-6 block text-sm font-medium text-slate-700" htmlFor="name">
+              Full name
+            </label>
+            <input id="name" name="name" className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" value={form.name} onChange={handleChange} required />
+
+            <label className="mt-4 block text-sm font-medium text-slate-700" htmlFor="email">
+              Email
+            </label>
+            <input id="email" name="email" type="email" className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" value={form.email} onChange={handleChange} required />
+
+            <label className="mt-4 block text-sm font-medium text-slate-700" htmlFor="phone">
+              Phone number
+            </label>
+            <input id="phone" name="phone" className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" value={form.phone} onChange={handleChange} required />
+
+            <label className="mt-4 block text-sm font-medium text-slate-700" htmlFor="nin">
+              NIN
+            </label>
+            <input id="nin" name="nin" inputMode="numeric" maxLength={11} className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" value={form.nin} onChange={handleChange} required />
+
+            <label className="mt-4 block text-sm font-medium text-slate-700" htmlFor="bvn">
+              BVN
+            </label>
+            <input id="bvn" name="bvn" inputMode="numeric" maxLength={11} className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" value={form.bvn} onChange={handleChange} required />
+
+            <label className="mt-4 block text-sm font-medium text-slate-700" htmlFor="password">
+              Password
+            </label>
+            <input id="password" name="password" type="password" className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" value={form.password} onChange={handleChange} required />
+
+            <label className="mt-4 block text-sm font-medium text-slate-700" htmlFor="pin">
+              4-digit transfer PIN
+            </label>
+            <input id="pin" name="pin" type="password" inputMode="numeric" maxLength={4} pattern="\d{4}" className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" value={form.pin} onChange={handleChange} required />
+
+            <label className="mt-4 block text-sm font-medium text-slate-700" htmlFor="pin_confirmation">
+              Confirm 4-digit transfer PIN
+            </label>
+            <input id="pin_confirmation" name="pin_confirmation" type="password" inputMode="numeric" maxLength={4} pattern="\d{4}" className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" value={form.pin_confirmation} onChange={handleChange} required />
+
+            {error ? <p className="mt-4 text-sm text-rose-600">{error}</p> : null}
+
+            <button type="submit" disabled={loading} className="mt-6 w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-violet-500 px-4 py-3 font-semibold text-white shadow-lg transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-70">
+              {loading ? 'Creating account...' : 'Create account'}
+            </button>
+
+            <p className="mt-4 text-center text-sm text-slate-500">
+              Already registered? <a href="/login" className="font-medium text-cyan-600">Sign in</a>
+            </p>
+          </form>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default Register;
