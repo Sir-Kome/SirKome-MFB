@@ -2,6 +2,7 @@ from datetime import datetime
 
 from fastapi.testclient import TestClient
 
+import main
 from main import app
 
 client = TestClient(app)
@@ -15,7 +16,7 @@ def test_login_success():
 
     assert response.status_code == 200
     data = response.json()
-    assert data["token"] == "demo-token"
+    assert data["token"]
     assert data["user"]["name"] == "Kome Isioro"
 
 
@@ -45,14 +46,37 @@ def test_register_creates_a_user_and_returns_profile():
             "phone": "+1-555-010-9999",
             "nin": "12345678901",
             "bvn": "10987654321",
+            "pin": "1234",
         },
     )
 
     assert response.status_code == 200
     data = response.json()
     assert data["user"]["email"].endswith("@example.com")
-    assert data["user"]["account_number"].startswith("VB-")
+    assert data["user"]["account_number"].startswith("SK-")
     assert data["user"]["balance"] == 0.0
+
+    with main.get_connection() as conn:
+        user = conn.execute("SELECT id, account_number FROM users WHERE email = ?", (data["user"]["email"],)).fetchone()
+        wallet = conn.execute("SELECT * FROM wallets WHERE user_id = ?", (user["id"],)).fetchone()
+
+    assert wallet is not None
+    assert wallet["wallet_balance"] == 0.0
+    assert wallet["account_number"] == user["account_number"]
+
+
+def test_login_does_not_persist_access_token_in_database():
+    email = "demo@sirkome.com"
+    response = client.post(
+        "/auth/login",
+        json={"email": email, "password": "demo1234"},
+    )
+
+    assert response.status_code == 200
+    with main.get_connection() as conn:
+        user = conn.execute("SELECT token FROM users WHERE email = ?", (email,)).fetchone()
+
+    assert user["token"] in (None, "")
 
 
 def test_transfer_moves_funds_between_accounts():
