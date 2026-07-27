@@ -335,43 +335,43 @@ The application implements multiple security mechanisms:
 
 ## Login Page
 
-![Login Page](screenshots/login.png)
+![Login Page](Screenshots/login.png)
 
 ---
 
 ## Registration Page
 
-![Registration Page](screenshots/register.png)
+![Registration Page](Screenshots/register.png)
 
 ---
 
 ## Customer Dashboard
 
-![Dashboard](screenshots/dashboard.png)
+![Dashboard](Screenshots/dashboard.png)
 
 ---
 
 ## Wallet
 
-![Wallet](screenshots/wallet.png)
+![Wallet](Screenshots/wallet.png)
 
 ---
 
 ## Transfer Page
 
-![Transfer Page](screenshots/transfer.png)
+![Transfer Page](Screenshots/transfer.png)
 
 ---
 
 ## Transaction History
 
-![Transaction History](screenshots/transactions.png)
+![Transaction History](Screenshots/transactions.png)
 
 ---
 
 ## Swagger API Documentation
 
-![Swagger](screenshots/swagger.png)
+![Swagger](Screenshots/swagger.png)
 
 ---
 
