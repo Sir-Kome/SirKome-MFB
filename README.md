@@ -1,72 +1,63 @@
 # SirKomeBankSystem
 
-A full-stack **Microfinance Banking System (MFB)** developed using **FastAPI** for the backend and **React (Vite)** for the frontend.
-
-The application simulates the core operations of a modern microfinance bank, including customer registration, secure authentication, wallet creation, account management, fund transfers, transaction history, and administrative operations.
+A full-stack **Microfinance Banking System (MFB)** built with **FastAPI** (Backend) and **React + Vite** (Frontend). The application simulates the core operations of a modern microfinance bank by allowing customers to register, securely authenticate, manage their accounts and wallets, transfer funds, and view transaction history through a responsive web interface.
 
 ---
 
-# Features
+# 🚀 Features
 
-## Customer Management
+## 👤 Customer Management
 
 - Customer registration
-- Secure login
-- User profile management
+- Secure login and authentication
+- Automatic account number generation
+- Automatic wallet creation
 - NIN validation
 - BVN validation
-- Automatic customer wallet creation
 
 ---
 
-## Wallet & Account Management
+## 💼 Wallet & Account Management
 
-- Automatic account number generation
-- Automatic wallet creation for every customer
+- Wallet linked to every customer account
 - Wallet balance management
 - Account balance inquiry
-- Savings and Current account support
-- Wallet linked to customer account
+- Real-time balance updates
 
 ---
 
-## Banking Operations
+## 💸 Banking Operations
 
-- Deposit funds
-- Withdraw funds
 - Transfer money between customer wallets
-- Real-time wallet balance updates
-- Account balance synchronization
+- Transaction PIN verification
 - Transaction history
 - Debit and credit transaction records
 
 ---
 
-## Authentication & Security
+## 🔒 Security
 
-- Password hashing (SHA-256)
-- Transaction PIN hashing
-- Custom HMAC-SHA256 signed Access Tokens
-- Token expiration
-- Protected API endpoints
-- HTTP Bearer Authentication
-- Input validation
+- SHA-256 password hashing
+- SHA-256 transaction PIN hashing
+- Custom HMAC-SHA256 signed Access Token authentication
+- Access token expiration
+- HTTP Bearer authentication
 - Parameterized SQL queries
+- Input validation
 - Exception handling
 - Audit logging
 
 ---
 
-## Admin Features
+## 👨‍💼 Admin Features
 
 - Customer management
 - Transaction monitoring
-- Audit logs
-- Administrative transfers
+- Audit logging
 
 ---
 
-# Project Structure
+# 📂 Project Structure
 
 ```text
 SirKomeBankSystem/
@@ -86,23 +77,32 @@ SirKomeBankSystem/
 │   ├── package.json
 │   └── ...
 │
+├── screenshots/
+│   ├── login.png
+│   ├── register.png
+│   ├── dashboard.png
+│   ├── wallet.png
+│   ├── transfer.png
+│   ├── transactions.png
+│   └── swagger.png
+│
 ├── README.md
 └── .gitignore
 ```
 
 ---
 
-# Technologies Used
+# 🛠 Technologies Used
 
 ## Backend
 
 - Python
 - FastAPI
 - SQLite
-- HMAC-SHA256 Access Token Authentication
-- HTTP Bearer Authentication
-- Hashlib
 - SQLite3
+- Hashlib
+- HMAC-SHA256
+- HTTP Bearer Authentication
 - Uvicorn
 
 ## Frontend
@@ -115,33 +115,34 @@ SirKomeBankSystem/
 
 ---
 
-# Authentication Flow
+# 🔐 Authentication Flow
 
 1. Customer registers.
-2. Customer wallet is automatically created.
-3. Customer logs in using email and password.
-4. Password is verified using SHA-256 hashing.
-5. Backend generates a signed Access Token.
-6. React stores the Access Token.
-7. Every protected request sends:
+2. A unique account number is generated.
+3. A customer wallet is automatically created.
+4. Customer logs in using email and password.
+5. Password is verified using SHA-256 hashing.
+6. Backend generates a signed Access Token.
+7. React stores the Access Token.
+8. Every protected request sends:
 
-```
+```http
 Authorization: Bearer <Access Token>
 ```
 
-8. Backend verifies:
+9. Backend verifies:
 
 - Token signature
 - Token expiration
 - Customer identity
 
-9. If valid, access is granted.
+10. If valid, access is granted.
 
 ---
 
-# Wallet Flow
+# 💼 Wallet Flow
 
-```
+```text
 Customer Registration
         │
         ▼
@@ -151,20 +152,20 @@ Create Customer
 Generate Account Number
         │
         ▼
-Create Customer Wallet
+Create Wallet
         │
         ▼
 Initialize Wallet Balance
         │
         ▼
-Registration Complete
+Registration Successful
 ```
 
 ---
 
-# Transfer Flow
+# 💸 Transfer Flow
 
-```
+```text
 Customer Initiates Transfer
         │
         ▼
@@ -189,23 +190,26 @@ Debit Sender Wallet
 Credit Receiver Wallet
         │
         ▼
-Record Transactions
+Record Debit Transaction
         │
         ▼
-Return Success Response
+Record Credit Transaction
+        │
+        ▼
+Transfer Successful
 ```
 
 ---
 
-# Installation
+# ⚙️ Installation
 
-## Clone Repository
+## Clone the Repository
 
 ```bash
 git clone https://github.com/Sir-Kome/SirKomeBankSystem.git
 ```
 
-Navigate into the project.
+Navigate into the project folder.
 
 ```bash
 cd SirKomeBankSystem
@@ -214,6 +218,8 @@ cd SirKomeBankSystem
 ---
 
 # Backend Setup
+
+Navigate to the backend folder.
 
 ```bash
 cd backend
@@ -225,7 +231,7 @@ Create a virtual environment.
 python -m venv venv
 ```
 
-Activate it.
+Activate the virtual environment.
 
 ### Windows
 
@@ -245,13 +251,13 @@ Run the backend.
 uvicorn main:app --reload
 ```
 
-Backend:
+Backend runs at:
 
 ```
 http://127.0.0.1:8000
 ```
 
-Swagger API Documentation:
+Swagger Documentation:
 
 ```
 http://127.0.0.1:8000/docs
@@ -263,23 +269,25 @@ http://127.0.0.1:8000/docs
 
 Open another terminal.
 
+Navigate to the frontend folder.
+
 ```bash
 cd frontend
 ```
 
-Install packages.
+Install dependencies.
 
 ```bash
 npm install
 ```
 
-Run the frontend.
+Run the application.
 
 ```bash
 npm run dev
 ```
 
-Frontend:
+Frontend runs at:
 
 ```
 http://localhost:5173
@@ -287,43 +295,35 @@ http://localhost:5173
 
 ---
 
-# API Endpoints
+# 🌐 API Endpoints
 
-## Authentication
+### Authentication
 
 - Register
 - Login
 
-## Wallet
+### Wallet
 
 - View Wallet
-- Wallet Balance
+- Check Wallet Balance
 
-## Customer
+### Banking
 
-- Get Profile
-- Update Profile
-
-## Banking
-
-- Deposit
-- Withdraw
-- Transfer
-- Check Balance
-- Transaction History
+- Transfer Funds
+- View Transaction History
 
 ---
 
-# Security
+# 🔒 Security Overview
 
-The system implements multiple security mechanisms:
+The application implements multiple security mechanisms:
 
 - SHA-256 Password Hashing
 - SHA-256 Transaction PIN Hashing
-- Custom HMAC-SHA256 Access Tokens
-- Token Expiration
+- Custom HMAC-SHA256 Signed Access Tokens
+- Access Token Expiration
 - HTTP Bearer Authentication
-- Protected Endpoints
+- Protected API Endpoints
 - Parameterized SQL Queries
 - Input Validation
 - Exception Handling
@@ -331,48 +331,69 @@ The system implements multiple security mechanisms:
 
 ---
 
-# Future Improvements
+# 📸 Screenshots
 
-- Refresh Tokens
-- PostgreSQL
-- Redis Session Storage
-- Email Verification
-- SMS Notifications
+## Login Page
+
+![Login Page](screenshots/login.png)
+
+---
+
+## Registration Page
+
+![Registration Page](screenshots/register.png)
+
+---
+
+## Customer Dashboard
+
+![Dashboard](screenshots/dashboard.png)
+
+---
+
+## Wallet
+
+![Wallet](screenshots/wallet.png)
+
+---
+
+## Transfer Page
+
+![Transfer Page](screenshots/transfer.png)
+
+---
+
+## Transaction History
+
+![Transaction History](screenshots/transactions.png)
+
+---
+
+## Swagger API Documentation
+
+![Swagger](screenshots/swagger.png)
+
+---
+
+# 🚀 Future Improvements
+
+- Refresh Token implementation
+- PostgreSQL support
+- Redis session storage
+- Email verification
+- SMS notifications
 - Two-Factor Authentication (2FA)
-- Loan Management
-- Card Management
-- QR Code Payments
-- Mobile Banking Application
-- Admin Analytics Dashboard
+- Loan management
+- Card management
+- QR code payments
+- Mobile banking application
+- Analytics dashboard
+- Docker deployment
+- Cloud hosting (AWS, Azure, or Google Cloud)
 
 ---
 
-# Screenshots
-
-Include screenshots of:
-
-- Login Page
-- Customer Dashboard
-- Wallet Overview
-- Transfer Page
-- Transaction History
-- Profile Page
-- Admin Dashboard
-
-Example:
-
-```
-screenshots/
-    login.png
-    dashboard.png
-    wallet.png
-    transfer.png
-    transactions.png
-```
-
----
-
-# Author
+# 👨‍💻 Author
 
 **Oghenekome Isioro**
 
@@ -380,12 +401,10 @@ Computer and Information Technology
 
 Veritas University Abuja
 
-GitHub:
-
-https://github.com/Sir-Kome
+GitHub: https://github.com/Sir-Kome
 
 ---
 
-# License
+# 📄 License
 
-This project is intended for educational, research, and learning purposes.
+This project was developed for educational and learning purposes. It demonstrates the design and implementation of a secure Microfinance Banking System using FastAPI, React, and SQLite.
