@@ -11,7 +11,7 @@ client = TestClient(app)
 def test_login_success():
     response = client.post(
         "/auth/login",
-        json={"email": "demo@sirkome.com", "password": "demo1234"},
+        json={"email": "komeisioro+demo@gmail.com", "password": "demo1234"},
     )
 
     assert response.status_code == 200
@@ -23,7 +23,7 @@ def test_login_success():
 def test_login_failure():
     response = client.post(
         "/auth/login",
-        json={"email": "demo@sirkome.com", "password": "wrong-password"},
+        json={"email": "komeisioro+demo@gmail.com", "password": "wrong-password"},
     )
 
     assert response.status_code == 401
@@ -66,7 +66,7 @@ def test_register_creates_a_user_and_returns_profile():
 
 
 def test_login_does_not_persist_access_token_in_database():
-    email = "demo@sirkome.com"
+    email = "komeisioro+demo@gmail.com"
     response = client.post(
         "/auth/login",
         json={"email": email, "password": "demo1234"},
@@ -82,7 +82,7 @@ def test_login_does_not_persist_access_token_in_database():
 def test_transfer_moves_funds_between_accounts():
     admin_response = client.post(
         "/auth/login",
-        json={"email": "admin@sirkome.com", "password": "admin1234"},
+        json={"email": "komeisioro+admin@gmail.com", "password": "admin1234"},
     )
     admin_token = admin_response.json()["token"]
 
