@@ -7,6 +7,9 @@ import sqlite3
 import time
 import uuid
 from datetime import datetime
+from pathlib import Path
+import smtplib
+from email.message import EmailMessage
 
 from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -26,6 +29,28 @@ security = HTTPBearer(auto_error=False)
 DB_PATH = os.path.join(os.path.dirname(__file__), "sirkome_bank.db")
 SECRET_KEY = os.getenv("SIRKOME_SECRET_KEY", "dev-secret-change-me")
 DEFAULT_ACCESS_TOKEN_TTL_SECONDS = 30 * 60
+
+
+def load_env_file():
+    env_path = Path(os.path.dirname(__file__)) / ".env"
+    if not env_path.exists():
+        return
+
+    with env_path.open() as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith('#'):
+                continue
+            if '=' not in line:
+                continue
+            k, v = line.split('=', 1)
+            k = k.strip()
+            v = v.strip().strip('"').strip("'")
+            if k:
+                os.environ[k] = v
+
+
+load_env_file()
 
 
 def get_access_token_ttl_seconds() -> int:
@@ -93,6 +118,12 @@ class TransferResponse(BaseModel):
     message: str
 
 
+class ProfileUpdateRequest(BaseModel):
+    name: str | None = None
+    phone: str | None = None
+    email: str | None = None
+
+
 def get_connection():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
@@ -105,12 +136,14 @@ def init_db():
             """
             CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT UNIQUE NOT NULL,
                 name TEXT NOT NULL,
                 email TEXT UNIQUE NOT NULL,
                 password TEXT NOT NULL,
                 phone TEXT NOT NULL,
                 account_number TEXT UNIQUE NOT NULL,
                 balance REAL NOT NULL DEFAULT 0.0,
+                wallet_id TEXT,
                 currency TEXT NOT NULL DEFAULT 'USD',
                 is_admin INTEGER NOT NULL DEFAULT 0,
                 token TEXT,
@@ -222,8 +255,22 @@ def ensure_user_columns():
             conn.execute("ALTER TABLE users ADD COLUMN bvn TEXT")
         if "pin_hash" not in columns:
             conn.execute("ALTER TABLE users ADD COLUMN pin_hash TEXT")
+        if "user_id" not in columns:
+            conn.execute("ALTER TABLE users ADD COLUMN user_id TEXT UNIQUE")
+        if "wallet_id" not in columns:
+            conn.execute("ALTER TABLE users ADD COLUMN wallet_id TEXT")
         conn.execute("UPDATE users SET pin_hash = ? WHERE pin_hash IS NULL", (hash_pin("1234"),))
         conn.execute("UPDATE users SET token = NULL WHERE token IS NOT NULL")
+        # backfill user_id and wallet_id for existing users
+        rows = conn.execute("SELECT id, account_number FROM users").fetchall()
+        for r in rows:
+            if not r["id"]:
+                continue
+            user_id_val = conn.execute("SELECT user_id FROM users WHERE id = ?", (r["id"],)).fetchone()[0]
+            if not user_id_val:
+                new_uid = f"USR-{uuid.uuid4().hex[:12].upper()}"
+                conn.execute("UPDATE users SET user_id = ? WHERE id = ?", (new_uid, r["id"]))
+        conn.commit()
         conn.commit()
 
 
@@ -291,39 +338,103 @@ def get_wallet_by_account(account_number: str):
         return conn.execute("SELECT * FROM wallets WHERE account_number = ?", (normalized_account,)).fetchone()
 
 
+def send_email(to_address: str, subject: str, body: str) -> bool:
+    load_env_file()
+
+    smtp_host = os.getenv("SIRKOME_SMTP_HOST")
+    smtp_port = int(os.getenv("SIRKOME_SMTP_PORT", "587"))
+    smtp_user = os.getenv("SIRKOME_SMTP_USER")
+    smtp_pass = os.getenv("SIRKOME_SMTP_PASS")
+
+    # Always log the notification for audit/debug
+    print({"email_to": to_address, "subject": subject, "body": body})
+
+    if not smtp_host or not smtp_user or not smtp_pass:
+        print("SMTP not configured: email notification skipped.")
+        return False
+
+    try:
+        msg = EmailMessage()
+        msg["Subject"] = subject
+        msg["From"] = os.getenv("SIRKOME_FROM", smtp_user)
+        msg["To"] = to_address
+        msg.set_content(body)
+
+        if smtp_port == 465:
+            with smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=10) as s:
+                s.login(smtp_user, smtp_pass)
+                s.send_message(msg)
+        else:
+            with smtplib.SMTP(smtp_host, smtp_port, timeout=10) as s:
+                s.starttls()
+                s.login(smtp_user, smtp_pass)
+                s.send_message(msg)
+        return True
+    except Exception as exc:
+        print("Email send failed:", exc)
+        return False
+
+
+def notify_user_by_email(to_address: str, subject: str, body: str) -> bool:
+    sent = send_email(to_address, subject, body)
+    if not sent:
+        print(f"Notification email could not be delivered to {to_address}.")
+    return sent
+
+
 def create_user_record(name: str, email: str, password: str, phone: str, nin: str, bvn: str, pin: str, is_admin: int = 0, balance: float = 0.0, account_number: str | None = None, token: str | None = None):
     account_number = account_number or generate_account_number()
     with get_connection() as conn:
+        user_id_val = f"USR-{uuid.uuid4().hex[:12].upper()}"
         cursor = conn.execute(
             """
-            INSERT INTO users (name, email, password, phone, account_number, balance, currency, is_admin, token, nin, bvn, pin_hash)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO users (user_id, name, email, password, phone, account_number, balance, currency, is_admin, token, nin, bvn, pin_hash, wallet_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (name, email, hash_password(password), phone, account_number, balance, "USD", is_admin, None, nin, bvn, hash_pin(pin)),
+            (user_id_val, name, email, hash_password(password), phone, account_number, balance, "USD", is_admin, None, nin, bvn, hash_pin(pin), None),
         )
         conn.commit()
         user_id = cursor.lastrowid
-        create_or_update_wallet(conn, user_id, account_number, float(balance))
+        wallet_id = create_or_update_wallet(conn, user_id, account_number, float(balance))
+        conn.execute("UPDATE users SET wallet_id = ? WHERE id = ?", (wallet_id, user_id))
         conn.commit()
         return conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
 
 
 def seed_default_users():
-    with get_connection() as conn:
-        conn.execute(
-            "INSERT OR IGNORE INTO users (name, email, password, phone, account_number, balance, currency, is_admin, token, nin, bvn, pin_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            ("Admin User", "admin@sirkome.com", hash_password("admin1234"), "+1-555-010-0001", "SK-ADMIN", 50000.0, "USD", 1, None, "11111111111", "22222222222", hash_pin("1234")),
+    # Use create_user_record which ensures required columns like `user_id` are set.
+    admin_exists = get_user_by_account("SK-ADMIN")
+    if not admin_exists:
+        create_user_record(
+            name="Admin User",
+            email="komeisioro+admin@gmail.com",
+            password="admin1234",
+            phone="+1-555-010-0001",
+            nin="11111111111",
+            bvn="22222222222",
+            pin="1234",
+            is_admin=1,
+            balance=50000.0,
+            account_number="SK-ADMIN",
         )
-        conn.execute(
-            "INSERT OR IGNORE INTO users (name, email, password, phone, account_number, balance, currency, is_admin, token, nin, bvn, pin_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            ("Kome Isioro", "demo@sirkome.com", hash_password("demo1234"), "+1 (555) 010-4821", "SK-4821", 24580.0, "USD", 0, None, "33333333333", "44444444444", hash_pin("1234")),
-        )
-        conn.commit()
 
-        users = conn.execute("SELECT id, account_number, balance FROM users WHERE email IN (?, ?)", ("admin@sirkome.com", "demo@sirkome.com")).fetchall()
-        for user in users:
-            create_or_update_wallet(conn, user["id"], user["account_number"], float(user["balance"] or 0.0))
-        conn.commit()
+    demo_exists = get_user_by_account("SK-4821")
+    if not demo_exists:
+        create_user_record(
+            name="Kome Isioro",
+            email="komeisioro+demo@gmail.com",
+            password="demo1234",
+            phone="+1 (555) 010-4821",
+            nin="33333333333",
+            bvn="44444444444",
+            pin="1234",
+            is_admin=0,
+            balance=24580.0,
+            account_number="SK-4821",
+        )
+
+    # Ensure wallets exist/are in sync for these accounts
+    ensure_wallets()
 
 
 def add_transaction(account_number: str, transaction_type: str, amount: float, description: str, related_account: str | None = None):
@@ -384,6 +495,9 @@ def register(payload: RegisterRequest):
     pin = validate_pin(payload.pin or "1234")
     user = create_user_record(payload.name, payload.email, payload.password, payload.phone, nin, bvn, pin)
     token = create_access_token(user["id"])
+    subject = "Welcome to SirKome Bank"
+    body = f"Hello {user['name']},\n\nYour account {user['account_number']} has been created. Welcome to SirKome Bank.\n\nRegards,\nSirKome Team"
+    notify_user_by_email(user["email"], subject, body)
     return build_auth_response(user, token)
 
 
@@ -475,4 +589,72 @@ def transfer(payload: TransferRequest, credentials: HTTPAuthorizationCredentials
     add_transaction(sender["account_number"], "debit", payload.amount, payload.description, receiver["account_number"])
     add_transaction(receiver["account_number"], "credit", payload.amount, payload.description, sender["account_number"])
 
+    sender_email = sender["email"]
+    receiver_email = receiver["email"]
+    notify_user_by_email(
+        sender_email,
+        "Debit notification - SirKome Bank",
+        f"Your account {sender['account_number']} was debited by {payload.amount} {sender['currency']}.\nDescription: {payload.description}",
+    )
+    notify_user_by_email(
+        receiver_email,
+        "Credit notification - SirKome Bank",
+        f"Your account {receiver['account_number']} was credited by {payload.amount} {receiver['currency']}.\nDescription: {payload.description}",
+    )
+
     return {"status": "success", "message": "Transfer completed"}
+
+
+@app.post("/profile/update")
+def update_profile(payload: ProfileUpdateRequest, credentials: HTTPAuthorizationCredentials | None = Depends(security)):
+    if not credentials:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+
+    user = get_user_by_token(credentials.credentials)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+
+    updates = []
+    params = []
+    if payload.name:
+        updates.append("name = ?")
+        params.append(payload.name)
+    if payload.phone:
+        updates.append("phone = ?")
+        params.append(payload.phone)
+    if payload.email:
+        updates.append("email = ?")
+        params.append(payload.email)
+
+    if not updates:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No fields to update")
+
+    params.append(user["id"])
+    with get_connection() as conn:
+        conn.execute(f"UPDATE users SET {', '.join(updates)} WHERE id = ?", tuple(params))
+        conn.commit()
+
+    # send profile update notification
+    try:
+        send_email(user["email"], "Profile updated - SirKome Bank", f"Hello {payload.name or user['name']},\n\nYour profile was updated. If you did not perform this change, contact support immediately.")
+    except Exception:
+        pass
+
+    return {"status": "success", "message": "Profile updated"}
+
+
+
+@app.post("/debug/send-test-email")
+def debug_send_test_email(payload: dict):
+    """Send a test email to verify SMTP configuration.
+
+    JSON body: { "email": "you@example.com", "subject": "optional", "body": "optional" }
+    """
+    email = payload.get("email")
+    subject = payload.get("subject", "SirKome Test Email")
+    body = payload.get("body", "This is a test email from SirKome Bank.")
+    if not email:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="email is required in the JSON body")
+
+    sent = send_email(email, subject, body)
+    return {"sent": sent}

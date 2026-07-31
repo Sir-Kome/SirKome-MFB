@@ -1,0 +1,70 @@
+name: SirKome CI
+
+on:
+  push:
+    branches:
+      - development
+      - staging
+      - main
+
+  pull_request:
+    branches:
+      - development
+      - staging
+      - main
+
+jobs:
+
+  backend:
+
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+
+        with:
+          python-version: "3.12"
+
+      - name: Install Dependencies
+        run: |
+          pip install -r requirements.txt
+
+      - name: Run Backend Tests
+        run: |
+          pytest
+
+  frontend:
+
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+
+        with:
+          node-version: 22
+
+      - name: Install Packages
+        run: |
+          npm install
+
+      - name: Run ESLint
+        run: |
+          npm run lint

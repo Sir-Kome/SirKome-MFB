@@ -1,3 +1,5 @@
+import Visibility from '@mui/icons-material/Visibility';
+import VisibilityOff from '@mui/icons-material/VisibilityOff';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
@@ -9,12 +11,15 @@ function Register() {
     name: '',
     email: '',
     password: '',
+    password_confirmation: '',
     phone: '',
     nin: '',
     bvn: '',
     pin: '',
     pin_confirmation: '',
   });
+  const [showPassword, setShowPassword] = useState(false);
+  const [showPasswordConfirmation, setShowPasswordConfirmation] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -43,6 +48,18 @@ function Register() {
 
     if (form.pin !== form.pin_confirmation) {
       setError('The transfer PINs do not match.');
+      setLoading(false);
+      return;
+    }
+
+    if (!form.password || form.password.length < 8) {
+      setError('Password must be at least 8 characters long.');
+      setLoading(false);
+      return;
+    }
+
+    if (form.password !== form.password_confirmation) {
+      setError('Passwords do not match.');
       setLoading(false);
       return;
     }
@@ -106,7 +123,32 @@ function Register() {
             <label className="mt-4 block text-sm font-medium text-slate-700" htmlFor="password">
               Password
             </label>
-            <input id="password" name="password" type="password" className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" value={form.password} onChange={handleChange} required />
+            <div className="relative mt-2">
+              <input id="password" name="password" type={showPassword ? 'text' : 'password'} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 pr-12" value={form.password} onChange={handleChange} required />
+              <button
+                type="button"
+                aria-label={showPassword ? 'Hide password' : 'Show password'}
+                onClick={() => setShowPassword((current) => !current)}
+                className="absolute inset-y-0 right-3 flex items-center text-slate-500 hover:text-slate-700"
+              >
+                {showPassword ? <VisibilityOff fontSize="small" /> : <Visibility fontSize="small" />}
+              </button>
+            </div>
+
+            <label className="mt-4 block text-sm font-medium text-slate-700" htmlFor="password_confirmation">
+              Confirm password
+            </label>
+            <div className="relative mt-2">
+              <input id="password_confirmation" name="password_confirmation" type={showPasswordConfirmation ? 'text' : 'password'} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 pr-12" value={form.password_confirmation} onChange={handleChange} required />
+              <button
+                type="button"
+                aria-label={showPasswordConfirmation ? 'Hide confirmed password' : 'Show confirmed password'}
+                onClick={() => setShowPasswordConfirmation((current) => !current)}
+                className="absolute inset-y-0 right-3 flex items-center text-slate-500 hover:text-slate-700"
+              >
+                {showPasswordConfirmation ? <VisibilityOff fontSize="small" /> : <Visibility fontSize="small" />}
+              </button>
+            </div>
 
             <label className="mt-4 block text-sm font-medium text-slate-700" htmlFor="pin">
               4-digit transfer PIN
