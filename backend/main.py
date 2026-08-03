@@ -136,7 +136,7 @@ def init_db():
             """
             CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id TEXT UNIQUE NOT NULL,
+                user_id TEXT,
                 name TEXT NOT NULL,
                 email TEXT UNIQUE NOT NULL,
                 password TEXT NOT NULL,
@@ -148,7 +148,8 @@ def init_db():
                 is_admin INTEGER NOT NULL DEFAULT 0,
                 token TEXT,
                 nin TEXT,
-                bvn TEXT
+                bvn TEXT,
+                pin_hash TEXT
             )
             """
         )
@@ -256,21 +257,21 @@ def ensure_user_columns():
         if "pin_hash" not in columns:
             conn.execute("ALTER TABLE users ADD COLUMN pin_hash TEXT")
         if "user_id" not in columns:
-            conn.execute("ALTER TABLE users ADD COLUMN user_id TEXT UNIQUE")
+            conn.execute("ALTER TABLE users ADD COLUMN user_id TEXT")
         if "wallet_id" not in columns:
             conn.execute("ALTER TABLE users ADD COLUMN wallet_id TEXT")
+
         conn.execute("UPDATE users SET pin_hash = ? WHERE pin_hash IS NULL", (hash_pin("1234"),))
         conn.execute("UPDATE users SET token = NULL WHERE token IS NOT NULL")
-        # backfill user_id and wallet_id for existing users
-        rows = conn.execute("SELECT id, account_number FROM users").fetchall()
-        for r in rows:
-            if not r["id"]:
+
+        rows = conn.execute("SELECT id, user_id, account_number FROM users").fetchall()
+        for row in rows:
+            if not row["id"]:
                 continue
-            user_id_val = conn.execute("SELECT user_id FROM users WHERE id = ?", (r["id"],)).fetchone()[0]
-            if not user_id_val:
+            if not row["user_id"]:
                 new_uid = f"USR-{uuid.uuid4().hex[:12].upper()}"
-                conn.execute("UPDATE users SET user_id = ? WHERE id = ?", (new_uid, r["id"]))
-        conn.commit()
+                conn.execute("UPDATE users SET user_id = ? WHERE id = ?", (new_uid, row["id"]))
+
         conn.commit()
 
 
@@ -308,9 +309,14 @@ def resolve_account_number(account_number: str) -> str:
     return aliases.get(account_number, account_number)
 
 
+def normalize_email(email: str) -> str:
+    return email.strip().lower()
+
+
 def get_user_by_email(email: str):
+    normalized_email = normalize_email(email)
     with get_connection() as conn:
-        return conn.execute("SELECT * FROM users WHERE email = ?", (email,)).fetchone()
+        return conn.execute("SELECT * FROM users WHERE LOWER(email) = ?", (normalized_email,)).fetchone()
 
 
 def get_user_by_account(account_number: str):
@@ -402,12 +408,11 @@ def create_user_record(name: str, email: str, password: str, phone: str, nin: st
 
 
 def seed_default_users():
-    # Use create_user_record which ensures required columns like `user_id` are set.
-    admin_exists = get_user_by_account("SK-ADMIN")
+    admin_exists = get_user_by_email("admin@sirkome.com")
     if not admin_exists:
         create_user_record(
             name="Admin User",
-            email="komeisioro+admin@gmail.com",
+            email="admin@sirkome.com",
             password="admin1234",
             phone="+1-555-010-0001",
             nin="11111111111",
@@ -418,11 +423,11 @@ def seed_default_users():
             account_number="SK-ADMIN",
         )
 
-    demo_exists = get_user_by_account("SK-4821")
+    demo_exists = get_user_by_email("demo@sirkome.com")
     if not demo_exists:
         create_user_record(
             name="Kome Isioro",
-            email="komeisioro+demo@gmail.com",
+            email="demo@sirkome.com",
             password="demo1234",
             phone="+1 (555) 010-4821",
             nin="33333333333",
@@ -433,7 +438,36 @@ def seed_default_users():
             account_number="SK-4821",
         )
 
-    # Ensure wallets exist/are in sync for these accounts
+    alias_admin_exists = get_user_by_email("komeisioro+admin@gmail.com")
+    if not alias_admin_exists:
+        create_user_record(
+            name="Admin User Alias",
+            email="komeisioro+admin@gmail.com",
+            password="admin1234",
+            phone="+1-555-010-0001",
+            nin="11111111111",
+            bvn="22222222222",
+            pin="1234",
+            is_admin=1,
+            balance=50000.0,
+            account_number="SK-ADMIN-ALIAS",
+        )
+
+    alias_demo_exists = get_user_by_email("komeisioro+demo@gmail.com")
+    if not alias_demo_exists:
+        create_user_record(
+            name="Kome Isioro Alias",
+            email="komeisioro+demo@gmail.com",
+            password="demo1234",
+            phone="+1 (555) 010-4821",
+            nin="33333333333",
+            bvn="44444444444",
+            pin="1234",
+            is_admin=0,
+            balance=24580.0,
+            account_number="SK-4821-ALIAS",
+        )
+
     ensure_wallets()
 
 
