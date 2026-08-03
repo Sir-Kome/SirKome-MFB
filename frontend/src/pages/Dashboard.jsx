@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { AccountBalanceWallet, ArrowCircleDown, ArrowCircleUp, AutoAwesome, History, Send, TrendingUp } from '@mui/icons-material';
+import { AccountBalanceWallet, ArrowCircleDown, ArrowCircleUp, AutoAwesome, DeleteOutline, History, Send, TrendingUp } from '@mui/icons-material';
 
 import BalanceCard from '../components/BalanceCard';
 import Navbar from '../components/Navbar';
@@ -20,6 +20,10 @@ function Dashboard() {
     return storedUser;
   });
   const [transactions, setTransactions] = useState([]);
+  const [adminUserId, setAdminUserId] = useState('');
+  const [adminMessage, setAdminMessage] = useState('');
+  const [adminDeleting, setAdminDeleting] = useState(false);
+  const [users, setUsers] = useState([]);
 
   useEffect(() => {
     const token = localStorage.getItem('sirkome_token');
@@ -31,16 +35,56 @@ function Dashboard() {
     Promise.all([
       api.get('/accounts', { headers: { Authorization: `Bearer ${token}` } }),
       api.get('/transactions', { headers: { Authorization: `Bearer ${token}` } }),
+      user?.is_admin ? api.get('/admin/users', { headers: { Authorization: `Bearer ${token}` } }) : Promise.resolve({ data: [] }),
     ])
-      .then(([, transactionsResponse]) => {
+      .then(([, transactionsResponse, usersResponse]) => {
         setTransactions(transactionsResponse.data);
+        if (user?.is_admin) {
+          setUsers(usersResponse.data);
+        }
       })
       .catch(() => {
         localStorage.removeItem('sirkome_token');
         localStorage.removeItem('sirkome_user');
         navigate('/login');
       });
-  }, [navigate]);
+  }, [navigate, user?.is_admin]);
+
+  const handleAdminDelete = async () => {
+    if (!adminUserId.trim()) {
+      setAdminMessage('Enter a user identifier to remove.');
+      return;
+    }
+
+    const selectedUser = users.find((entry) => entry.user_id === adminUserId.trim() || String(entry.id) === adminUserId.trim());
+    if (!selectedUser) {
+      setAdminMessage('That user is not available in the admin list.');
+      return;
+    }
+
+    const confirmed = window.confirm(`Remove ${selectedUser.name} (${selectedUser.email}) from the database?`);
+    if (!confirmed) {
+      return;
+    }
+
+    setAdminDeleting(true);
+    setAdminMessage('');
+
+    try {
+      const token = localStorage.getItem('sirkome_token');
+      const response = await api.delete(`/admin/users/${encodeURIComponent(adminUserId.trim())}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      setAdminMessage(response.data?.message || 'User removed successfully.');
+      setUsers((current) => current.filter((entry) => entry.user_id !== adminUserId.trim() && String(entry.id) !== adminUserId.trim()));
+      setAdminUserId('');
+    } catch (error) {
+      setAdminMessage(error.response?.data?.detail || 'Unable to remove the selected user.');
+    } finally {
+      setAdminDeleting(false);
+    }
+  };
 
   if (!user) {
     return null;
@@ -122,7 +166,7 @@ function Dashboard() {
                         </div>
                       </div>
                       <span className={`font-semibold ${item.type === 'credit' ? 'text-emerald-600' : 'text-slate-700'}`}>
-                        {item.type === 'credit' ? '+' : '-'}${item.amount.toFixed(2)}
+                        {item.type === 'credit' ? '+' : '-'}₦{item.amount.toFixed(2)}
                       </span>
                     </div>
                   ))}
@@ -130,7 +174,61 @@ function Dashboard() {
               </section>
             </div>
 
-            <div className="space-y-4">
+            <div className="space-y-4">              {user?.is_admin ? (
+                <section className="rounded-[28px] border border-rose-200/70 bg-white/80 p-5 shadow-lg backdrop-blur">
+                  <div className="mb-4 flex items-center justify-between">
+                    <div>
+                      <p className="text-sm text-slate-500">Admin tools</p>
+                      <h2 className="text-lg font-semibold text-slate-900">Remove a user safely</h2>
+                    </div>
+                    <div className="rounded-2xl bg-rose-50 p-2 text-rose-600">
+                      <DeleteOutline fontSize="small" />
+                    </div>
+                  </div>
+                  <div className="space-y-3">
+                    <label className="block text-sm font-medium text-slate-700" htmlFor="admin-user-id">
+                      Available users
+                    </label>
+                    <div className="max-h-44 space-y-2 overflow-auto rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                      {users.length === 0 ? (
+                        <p className="text-sm text-slate-500">No users loaded.</p>
+                      ) : (
+                        users.map((entry) => (
+                          <button
+                            key={entry.user_id || entry.id}
+                            type="button"
+                            onClick={() => setAdminUserId(entry.user_id || String(entry.id))}
+                            className="block w-full rounded-xl bg-white px-3 py-2 text-left text-sm text-slate-700 shadow-sm transition hover:bg-slate-100"
+                          >
+                            <span className="font-semibold">{entry.name}</span>
+                            <span className="block text-slate-500">{entry.email}</span>
+                            <span className="block text-slate-400">{entry.user_id}</span>
+                          </button>
+                        ))
+                      )}
+                    </div>
+                    <label className="block text-sm font-medium text-slate-700" htmlFor="admin-user-id">
+                      User ID
+                    </label>
+                    <input
+                      id="admin-user-id"
+                      value={adminUserId}
+                      onChange={(event) => setAdminUserId(event.target.value)}
+                      placeholder="Enter USR-... or numeric user id"
+                      className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleAdminDelete}
+                      disabled={adminDeleting}
+                      className="w-full rounded-2xl bg-rose-600 px-4 py-3 text-sm font-semibold text-white shadow-lg transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-70"
+                    >
+                      {adminDeleting ? 'Removing user...' : 'Remove user'}
+                    </button>
+                    {adminMessage ? <p className="text-sm text-slate-700">{adminMessage}</p> : null}
+                  </div>
+                </section>
+              ) : null}
               <section className="rounded-[28px] border border-slate-200/70 bg-white/80 p-5 shadow-lg backdrop-blur">
                 <div className="flex items-center justify-between">
                   <div>

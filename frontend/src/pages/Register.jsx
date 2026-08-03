@@ -8,7 +8,9 @@ import api from '../services/api';
 function Register() {
   const navigate = useNavigate();
   const [form, setForm] = useState({
-    name: '',
+    first_name: '',
+    last_name: '',
+    middle_name: '',
     email: '',
     password: '',
     password_confirmation: '',
@@ -29,16 +31,41 @@ function Register() {
       ? value.replace(/\D/g, '').slice(0, 11)
       : name === 'pin' || name === 'pin_confirmation'
         ? value.replace(/\D/g, '').slice(0, 4)
-        : value;
+        : name === 'phone'
+          ? value.replace(/[^\d+\s]/g, '').slice(0, 20)
+          : name === 'first_name' || name === 'last_name' || name === 'middle_name'
+            ? value.replace(/[^A-Za-z\s'-]/g, '')
+            : value;
     setForm((current) => ({ ...current, [name]: sanitizedValue }));
   };
 
   const validateIdentity = (value) => /^\d{11}$/.test(value);
+  const validateNigerianPhone = (value) => /^(\+234|234|0)\d{10}$/.test(value.replace(/\s+/g, ''));
+  const validateName = (value) => /^[A-Za-z][A-Za-z\s'-]*$/.test(value.trim());
 
   const handleSubmit = async (event) => {
     event.preventDefault();
     setLoading(true);
     setError('');
+
+    const fullName = `${form.first_name || ''} ${form.last_name || ''}`.trim();
+    if (!form.first_name || !form.last_name || !validateName(form.first_name) || !validateName(form.last_name)) {
+      setError('First name and last name are required and must contain only letters, spaces, apostrophes, or hyphens.');
+      setLoading(false);
+      return;
+    }
+
+    if (form.middle_name && !validateName(form.middle_name)) {
+      setError('Middle name must contain only letters, spaces, apostrophes, or hyphens.');
+      setLoading(false);
+      return;
+    }
+
+    if (!validateNigerianPhone(form.phone)) {
+      setError('Phone number must be a valid Nigerian mobile number.');
+      setLoading(false);
+      return;
+    }
 
     if (!validateIdentity(form.nin) || !validateIdentity(form.bvn) || !/^\d{4}$/.test(form.pin)) {
       setError('NIN and BVN must each be exactly 11 digits, and PIN must be exactly 4 digits.');
@@ -65,7 +92,10 @@ function Register() {
     }
 
     try {
-      const registrationData = { ...form };
+      const registrationData = {
+        ...form,
+        name: fullName,
+      };
       delete registrationData.pin_confirmation;
       const response = await api.post('/auth/register', registrationData);
       const { token, user } = response.data;
@@ -95,10 +125,25 @@ function Register() {
             <p className="text-sm font-medium uppercase tracking-[0.3em] text-cyan-600">Sign up</p>
             <h2 className="mt-2 text-2xl font-semibold text-slate-900">Create your bank account</h2>
 
-            <label className="mt-6 block text-sm font-medium text-slate-700" htmlFor="name">
-              Full name
+            <div className="grid gap-4 md:grid-cols-2">
+              <div>
+                <label className="mt-6 block text-sm font-medium text-slate-700" htmlFor="first_name">
+                  First name
+                </label>
+                <input id="first_name" name="first_name" className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" value={form.first_name} onChange={handleChange} required />
+              </div>
+              <div>
+                <label className="mt-6 block text-sm font-medium text-slate-700" htmlFor="last_name">
+                  Last name
+                </label>
+                <input id="last_name" name="last_name" className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" value={form.last_name} onChange={handleChange} required />
+              </div>
+            </div>
+
+            <label className="mt-4 block text-sm font-medium text-slate-700" htmlFor="middle_name">
+              Middle name (optional)
             </label>
-            <input id="name" name="name" className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" value={form.name} onChange={handleChange} required />
+            <input id="middle_name" name="middle_name" className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" value={form.middle_name} onChange={handleChange} />
 
             <label className="mt-4 block text-sm font-medium text-slate-700" htmlFor="email">
               Email

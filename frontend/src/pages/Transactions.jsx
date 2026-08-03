@@ -77,7 +77,7 @@ function Transactions() {
                       </div>
                     </div>
                     <span className={`font-semibold ${item.type === 'credit' ? 'text-emerald-600' : 'text-slate-700'}`}>
-                      {item.type === 'credit' ? '+' : '-'}${item.amount.toFixed(2)}
+                      {item.type === 'credit' ? '+' : '-'}₦{item.amount.toFixed(2)}
                     </span>
                   </div>
                 ))}

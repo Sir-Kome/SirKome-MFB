@@ -12,7 +12,7 @@ function BalanceCard({ balance, accountNumber, userName, onSend }) {
         <div>
           <p className="text-sm text-slate-300">Available balance</p>
           <div className="mt-2 flex items-center gap-3">
-            <p className="text-4xl font-semibold">{showBalance ? `$${Number(balance || 0).toFixed(2)}` : '••••••'}</p>
+            <p className="text-4xl font-semibold">{showBalance ? `₦${Number(balance || 0).toFixed(2)}` : '••••••'}</p>
             <button
               type="button"
               aria-label={showBalance ? 'Hide balance' : 'Show balance'}

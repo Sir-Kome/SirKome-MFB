@@ -79,6 +79,24 @@ def test_login_does_not_persist_access_token_in_database():
     assert user["token"] in (None, "")
 
 
+def test_admin_can_list_users():
+    admin_response = client.post(
+        "/auth/login",
+        json={"email": "admin@sirkome.com", "password": "admin1234"},
+    )
+    admin_token = admin_response.json()["token"]
+
+    response = client.get(
+        "/admin/users",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert isinstance(data, list)
+    assert any(item["email"] == "demo@sirkome.com" for item in data)
+
+
 def test_transfer_moves_funds_between_accounts():
     admin_response = client.post(
         "/auth/login",
