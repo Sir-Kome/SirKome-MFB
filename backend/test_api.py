@@ -20,6 +20,17 @@ def test_login_success():
     assert data["user"]["name"] == "Kome Isioro"
 
 
+def test_admin_login_returns_admin_flag_for_dashboard():
+    response = client.post(
+        "/auth/login",
+        json={"email": "admin@sirkome.com", "password": "admin1234"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["user"]["is_admin"] is True
+
+
 def test_login_failure():
     response = client.post(
         "/auth/login",
@@ -57,8 +68,8 @@ def test_register_creates_a_user_and_returns_profile():
     assert data["user"]["balance"] == 0.0
 
     with main.get_connection() as conn:
-        user = conn.execute("SELECT id, account_number FROM users WHERE email = ?", (data["user"]["email"],)).fetchone()
-        wallet = conn.execute("SELECT * FROM wallets WHERE user_id = ?", (user["id"],)).fetchone()
+        user = conn.execute("SELECT id, user_id, account_number FROM users WHERE email = ?", (data["user"]["email"],)).fetchone()
+        wallet = conn.execute("SELECT * FROM wallets WHERE user_id = ?", (user["user_id"],)).fetchone()
 
     assert wallet is not None
     assert wallet["wallet_balance"] == 0.0
@@ -77,6 +88,26 @@ def test_login_does_not_persist_access_token_in_database():
         user = conn.execute("SELECT token FROM users WHERE email = ?", (email,)).fetchone()
 
     assert user["token"] in (None, "")
+
+
+def test_wallet_user_id_uses_alphanumeric_user_reference():
+    response = client.post(
+        "/auth/login",
+        json={"email": "admin@sirkome.com", "password": "admin1234"},
+    )
+
+    assert response.status_code == 200
+    user = main.get_user_by_email("admin@sirkome.com")
+
+    with main.get_connection() as conn:
+        wallet = conn.execute(
+            "SELECT user_id, wallet_id FROM wallets WHERE account_number = ?",
+            (user["account_number"],),
+        ).fetchone()
+
+    assert wallet is not None
+    assert wallet["user_id"] == user["user_id"]
+    assert wallet["wallet_id"] == user["user_id"]
 
 
 def test_admin_can_list_users():

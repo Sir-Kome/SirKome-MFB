@@ -96,6 +96,7 @@ class UserProfile(BaseModel):
     account_number: str
     balance: float
     currency: str = DEFAULT_CURRENCY
+    is_admin: bool = False
 
 
 class AccountResponse(BaseModel):
@@ -146,7 +147,6 @@ def init_db():
                 password TEXT NOT NULL,
                 phone TEXT NOT NULL,
                 account_number TEXT UNIQUE NOT NULL,
-                balance REAL NOT NULL DEFAULT 0.0,
                 wallet_id TEXT,
                 currency TEXT NOT NULL DEFAULT 'NGN',
                 is_admin INTEGER NOT NULL DEFAULT 0,
@@ -238,18 +238,19 @@ def create_or_update_wallet(conn: sqlite3.Connection, user_ref: int | str, accou
     wallet_id = wallet_id or str(user_ref)
     existing_wallet = conn.execute(
         "SELECT wallet_id FROM wallets WHERE user_id = ? OR wallet_id = ? OR account_number = ?",
-        (user_ref, wallet_id, account_number),
+        (wallet_id, wallet_id, account_number),
     ).fetchone()
+
     if existing_wallet:
         conn.execute(
             "UPDATE wallets SET wallet_id = ?, user_id = ?, account_number = ?, wallet_balance = ?, currency = ?, status = 'active' WHERE wallet_id = ?",
-            (wallet_id, user_ref, account_number, float(balance), DEFAULT_CURRENCY, existing_wallet["wallet_id"]),
+            (wallet_id, wallet_id, account_number, float(balance), DEFAULT_CURRENCY, existing_wallet["wallet_id"]),
         )
         return wallet_id
 
     conn.execute(
         "INSERT INTO wallets (wallet_id, user_id, account_number, wallet_balance, currency, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-        (wallet_id, user_ref, account_number, float(balance), DEFAULT_CURRENCY, "active", datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+        (wallet_id, wallet_id, account_number, float(balance), DEFAULT_CURRENCY, "active", datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
     )
     return wallet_id
 
@@ -267,6 +268,56 @@ def ensure_user_columns():
             conn.execute("ALTER TABLE users ADD COLUMN user_id TEXT")
         if "wallet_id" not in columns:
             conn.execute("ALTER TABLE users ADD COLUMN wallet_id TEXT")
+        if "balance" in columns:
+            rows = conn.execute(
+                "SELECT id, user_id, name, email, password, phone, account_number, wallet_id, currency, is_admin, token, nin, bvn, pin_hash FROM users"
+            ).fetchall()
+            conn.execute(
+                """
+                CREATE TABLE users_new (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id TEXT UNIQUE NOT NULL,
+                    name TEXT NOT NULL,
+                    email TEXT UNIQUE NOT NULL,
+                    password TEXT NOT NULL,
+                    phone TEXT NOT NULL,
+                    account_number TEXT UNIQUE NOT NULL,
+                    wallet_id TEXT,
+                    currency TEXT NOT NULL DEFAULT 'NGN',
+                    is_admin INTEGER NOT NULL DEFAULT 0,
+                    token TEXT,
+                    nin TEXT,
+                    bvn TEXT,
+                    pin_hash TEXT
+                )
+                """
+            )
+            for row in rows:
+                conn.execute(
+                    """
+                    INSERT INTO users_new (id, user_id, name, email, password, phone, account_number, wallet_id, currency, is_admin, token, nin, bvn, pin_hash)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        row["id"],
+                        row["user_id"],
+                        row["name"],
+                        row["email"],
+                        row["password"],
+                        row["phone"],
+                        row["account_number"],
+                        row["wallet_id"] or row["user_id"],
+                        row["currency"],
+                        row["is_admin"],
+                        row["token"],
+                        row["nin"],
+                        row["bvn"],
+                        row["pin_hash"],
+                    ),
+                )
+            conn.execute("DROP TABLE users")
+            conn.execute("ALTER TABLE users_new RENAME TO users")
+            conn.commit()
 
         conn.execute("UPDATE users SET pin_hash = ? WHERE pin_hash IS NULL", (hash_pin("1234"),))
         conn.execute("UPDATE users SET token = NULL WHERE token IS NOT NULL")
@@ -284,13 +335,17 @@ def ensure_user_columns():
 
 def ensure_wallets():
     with get_connection() as conn:
-        users = conn.execute("SELECT id, user_id, account_number, balance FROM users").fetchall()
+        users = conn.execute("SELECT id, user_id, account_number FROM users").fetchall()
         for user in users:
+            wallet_balance = conn.execute(
+                "SELECT wallet_balance FROM wallets WHERE account_number = ?",
+                (user["account_number"],),
+            ).fetchone()
             create_or_update_wallet(
                 conn,
-                user["id"],
+                user["user_id"] or user["id"],
                 user["account_number"],
-                float(user["balance"] or 0.0),
+                float(wallet_balance["wallet_balance"] if wallet_balance else 0.0),
                 wallet_id=user["user_id"] or f"USR-{uuid.uuid4().hex[:12].upper()}",
             )
         conn.commit()
@@ -443,14 +498,14 @@ def create_user_record(name: str, email: str, password: str, phone: str, nin: st
         user_id_val = f"USR-{uuid.uuid4().hex[:12].upper()}"
         cursor = conn.execute(
             """
-            INSERT INTO users (user_id, name, email, password, phone, account_number, balance, currency, is_admin, token, nin, bvn, pin_hash, wallet_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO users (user_id, name, email, password, phone, account_number, currency, is_admin, token, nin, bvn, pin_hash, wallet_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (user_id_val, name, email, hash_password(password), phone, account_number, balance, DEFAULT_CURRENCY, is_admin, None, nin, bvn, hash_pin(pin), None),
+            (user_id_val, name, email, hash_password(password), phone, account_number, DEFAULT_CURRENCY, is_admin, None, nin, bvn, hash_pin(pin), user_id_val),
         )
         conn.commit()
         user_id = cursor.lastrowid
-        wallet_id = create_or_update_wallet(conn, user_id, account_number, float(balance), wallet_id=user_id_val)
+        wallet_id = create_or_update_wallet(conn, user_id_val, account_number, float(balance), wallet_id=user_id_val)
         conn.execute("UPDATE users SET wallet_id = ? WHERE id = ?", (wallet_id, user_id))
         conn.commit()
         return conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
@@ -541,13 +596,14 @@ def home():
 
 
 def build_user_profile(user):
+    wallet = get_wallet_by_account(user["account_number"])
     return {
         "user_id": user["user_id"],
         "name": user["name"],
         "email": user["email"],
         "phone": user["phone"],
         "account_number": user["account_number"],
-        "balance": float(user["balance"]),
+        "balance": float(wallet["wallet_balance"] if wallet else 0.0),
         "currency": DEFAULT_CURRENCY,
         "is_admin": bool(user["is_admin"]),
     }
@@ -610,7 +666,7 @@ def get_accounts(credentials: HTTPAuthorizationCredentials | None = Depends(secu
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
 
     wallet = get_wallet_by_account(user["account_number"])
-    balance = float(wallet["wallet_balance"] if wallet else user["balance"])
+    balance = float(wallet["wallet_balance"] if wallet else 0.0)
 
     return [{
         "account_number": user["account_number"],
@@ -681,8 +737,6 @@ def transfer(payload: TransferRequest, credentials: HTTPAuthorizationCredentials
     with get_connection() as conn:
         conn.execute("UPDATE wallets SET wallet_balance = wallet_balance - ? WHERE account_number = ?", (payload.amount, sender["account_number"]))
         conn.execute("UPDATE wallets SET wallet_balance = wallet_balance + ? WHERE account_number = ?", (payload.amount, receiver["account_number"]))
-        conn.execute("UPDATE users SET balance = (SELECT wallet_balance FROM wallets WHERE account_number = ?) WHERE account_number = ?", (sender["account_number"], sender["account_number"]))
-        conn.execute("UPDATE users SET balance = (SELECT wallet_balance FROM wallets WHERE account_number = ?) WHERE account_number = ?", (receiver["account_number"], receiver["account_number"]))
         conn.commit()
 
     add_transaction(sender["account_number"], "debit", payload.amount, payload.description, receiver["account_number"])
@@ -754,7 +808,7 @@ def list_users(credentials: HTTPAuthorizationCredentials | None = Depends(securi
 
     with get_connection() as conn:
         rows = conn.execute(
-            "SELECT id, user_id, name, email, account_number, phone, balance, currency, is_admin FROM users ORDER BY id ASC"
+            "SELECT id, user_id, name, email, account_number, phone, currency, is_admin FROM users ORDER BY id ASC"
         ).fetchall()
 
     return [
@@ -765,7 +819,7 @@ def list_users(credentials: HTTPAuthorizationCredentials | None = Depends(securi
             "email": row["email"],
             "account_number": row["account_number"],
             "phone": row["phone"],
-            "balance": float(row["balance"]),
+            "balance": float(get_wallet_by_account(row["account_number"])["wallet_balance"] if get_wallet_by_account(row["account_number"]) else 0.0),
             "currency": row["currency"],
             "is_admin": bool(row["is_admin"]),
         }
