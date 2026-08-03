@@ -15,8 +15,10 @@ const quickActions = [
 
 function Dashboard() {
   const navigate = useNavigate();
-  const [user, setUser] = useState(null);
-  const [accounts, setAccounts] = useState([]);
+  const [user] = useState(() => {
+    const storedUser = JSON.parse(localStorage.getItem('sirkome_user') || 'null');
+    return storedUser;
+  });
   const [transactions, setTransactions] = useState([]);
 
   useEffect(() => {
@@ -26,15 +28,11 @@ function Dashboard() {
       return;
     }
 
-    const storedUser = JSON.parse(localStorage.getItem('sirkome_user') || 'null');
-    setUser(storedUser);
-
     Promise.all([
       api.get('/accounts', { headers: { Authorization: `Bearer ${token}` } }),
       api.get('/transactions', { headers: { Authorization: `Bearer ${token}` } }),
     ])
-      .then(([accountsResponse, transactionsResponse]) => {
-        setAccounts(accountsResponse.data);
+      .then(([, transactionsResponse]) => {
         setTransactions(transactionsResponse.data);
       })
       .catch(() => {

@@ -8,7 +8,10 @@ import api from '../services/api';
 
 function Transactions() {
   const navigate = useNavigate();
-  const [user, setUser] = useState(null);
+  const [user] = useState(() => {
+    const storedUser = JSON.parse(localStorage.getItem('sirkome_user') || 'null');
+    return storedUser;
+  });
   const [transactions, setTransactions] = useState([]);
 
   useEffect(() => {
@@ -17,9 +20,6 @@ function Transactions() {
       navigate('/login');
       return;
     }
-
-    const storedUser = JSON.parse(localStorage.getItem('sirkome_user') || 'null');
-    setUser(storedUser);
 
     api.get('/transactions', { headers: { Authorization: `Bearer ${token}` } })
       .then((response) => {
