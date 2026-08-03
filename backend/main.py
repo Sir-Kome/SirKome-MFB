@@ -101,6 +101,12 @@ def get_connection():
 
 def init_db():
     with get_connection() as conn:
+        users_columns = {row["name"] for row in conn.execute("PRAGMA table_info(users)").fetchall()}
+        if users_columns and ("user_id" in users_columns or "wallet_id" in users_columns or "pin_hash" not in users_columns):
+            conn.execute("DROP TABLE IF EXISTS transactions")
+            conn.execute("DROP TABLE IF EXISTS wallets")
+            conn.execute("DROP TABLE IF EXISTS users")
+
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS users (
@@ -115,7 +121,8 @@ def init_db():
                 is_admin INTEGER NOT NULL DEFAULT 0,
                 token TEXT,
                 nin TEXT,
-                bvn TEXT
+                bvn TEXT,
+                pin_hash TEXT
             )
             """
         )
@@ -261,9 +268,14 @@ def resolve_account_number(account_number: str) -> str:
     return aliases.get(account_number, account_number)
 
 
+def normalize_email(email: str) -> str:
+    return email.strip().lower()
+
+
 def get_user_by_email(email: str):
+    normalized_email = normalize_email(email)
     with get_connection() as conn:
-        return conn.execute("SELECT * FROM users WHERE email = ?", (email,)).fetchone()
+        return conn.execute("SELECT * FROM users WHERE LOWER(email) = ?", (normalized_email,)).fetchone()
 
 
 def get_user_by_account(account_number: str):
@@ -316,11 +328,22 @@ def seed_default_users():
         )
         conn.execute(
             "INSERT OR IGNORE INTO users (name, email, password, phone, account_number, balance, currency, is_admin, token, nin, bvn, pin_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("Admin User", "komeisioro+admin@gmail.com", hash_password("admin1234"), "+1-555-010-0001", "SK-ADMIN-ALIAS", 50000.0, "USD", 1, None, "11111111111", "22222222222", hash_pin("1234")),
+        )
+        conn.execute(
+            "INSERT OR IGNORE INTO users (name, email, password, phone, account_number, balance, currency, is_admin, token, nin, bvn, pin_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             ("Kome Isioro", "demo@sirkome.com", hash_password("demo1234"), "+1 (555) 010-4821", "SK-4821", 24580.0, "USD", 0, None, "33333333333", "44444444444", hash_pin("1234")),
+        )
+        conn.execute(
+            "INSERT OR IGNORE INTO users (name, email, password, phone, account_number, balance, currency, is_admin, token, nin, bvn, pin_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("Kome Isioro", "komeisioro+demo@gmail.com", hash_password("demo1234"), "+1 (555) 010-4821", "SK-4821-ALIAS", 24580.0, "USD", 0, None, "33333333333", "44444444444", hash_pin("1234")),
         )
         conn.commit()
 
-        users = conn.execute("SELECT id, account_number, balance FROM users WHERE email IN (?, ?)", ("admin@sirkome.com", "demo@sirkome.com")).fetchall()
+        users = conn.execute(
+            "SELECT id, account_number, balance FROM users WHERE email IN (?, ?, ?, ?)",
+            ("admin@sirkome.com", "komeisioro+admin@gmail.com", "demo@sirkome.com", "komeisioro+demo@gmail.com"),
+        ).fetchall()
         for user in users:
             create_or_update_wallet(conn, user["id"], user["account_number"], float(user["balance"] or 0.0))
         conn.commit()
