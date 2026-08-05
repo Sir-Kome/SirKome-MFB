@@ -1,7 +1,14 @@
+import Visibility from '@mui/icons-material/Visibility';
+import VisibilityOff from '@mui/icons-material/VisibilityOff';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import api from '../services/api';
+
+const validateEmailAddress = (value) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+const validateName = (value) => /^[A-Za-z\s'\-]+$/.test(value.trim());
+const validateNigerianPhone = (value) => /^\+?234\d{10}$/.test(value.replace(/\s+/g, ''));
+const validateIdentity = (value) => /^\d{11}$/.test(value);
 
 function Register() {
   const navigate = useNavigate();
@@ -9,6 +16,7 @@ function Register() {
     name: '',
     email: '',
     password: '',
+    password_confirmation: '',
     phone: '',
     nin: '',
     bvn: '',
@@ -17,6 +25,10 @@ function Register() {
   });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [showPasswordConfirmation, setShowPasswordConfirmation] = useState(false);
+  const [showPin, setShowPin] = useState(false);
+  const [showPinConfirmation, setShowPinConfirmation] = useState(false);
 
   const handleChange = (event) => {
     const { name, value } = event.target;
@@ -25,18 +37,53 @@ function Register() {
       : name === 'pin' || name === 'pin_confirmation'
         ? value.replace(/\D/g, '').slice(0, 4)
         : value;
+
     setForm((current) => ({ ...current, [name]: sanitizedValue }));
   };
-
-  const validateIdentity = (value) => /^\d{11}$/.test(value);
 
   const handleSubmit = async (event) => {
     event.preventDefault();
     setLoading(true);
     setError('');
 
-    if (!validateIdentity(form.nin) || !validateIdentity(form.bvn) || !/^\d{4}$/.test(form.pin)) {
-      setError('NIN and BVN must each be exactly 11 digits, and PIN must be exactly 4 digits.');
+    if (!form.name.trim() || !validateName(form.name)) {
+      setError('Full name is required and must contain only letters, spaces, apostrophes, or hyphens.');
+      setLoading(false);
+      return;
+    }
+
+    if (!validateEmailAddress(form.email)) {
+      setError('Please enter a valid email address.');
+      setLoading(false);
+      return;
+    }
+
+    if (!validateNigerianPhone(form.phone)) {
+      setError('Phone number must be a valid Nigerian mobile number.');
+      setLoading(false);
+      return;
+    }
+
+    if (!validateIdentity(form.nin) || !validateIdentity(form.bvn)) {
+      setError('NIN and BVN must each be exactly 11 digits.');
+      setLoading(false);
+      return;
+    }
+
+    if (form.password.length < 6) {
+      setError('Password must be at least 6 characters long.');
+      setLoading(false);
+      return;
+    }
+
+    if (form.password !== form.password_confirmation) {
+      setError('The passwords do not match.');
+      setLoading(false);
+      return;
+    }
+
+    if (!/^\d{4}$/.test(form.pin)) {
+      setError('PIN must be exactly 4 digits.');
       setLoading(false);
       return;
     }
@@ -48,8 +95,7 @@ function Register() {
     }
 
     try {
-      const registrationData = { ...form };
-      delete registrationData.pin_confirmation;
+      const { password_confirmation, pin_confirmation, ...registrationData } = form;
       const response = await api.post('/auth/register', registrationData);
       const { token, user } = response.data;
       localStorage.setItem('sirkome_token', token);
@@ -79,44 +125,89 @@ function Register() {
             <h2 className="mt-2 text-2xl font-semibold text-slate-900">Create your bank account</h2>
 
             <label className="mt-6 block text-sm font-medium text-slate-700" htmlFor="name">
-              Full name
+              Full name <span className="text-rose-500">*</span>
             </label>
             <input id="name" name="name" className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" value={form.name} onChange={handleChange} required />
 
             <label className="mt-4 block text-sm font-medium text-slate-700" htmlFor="email">
-              Email
+              Email <span className="text-rose-500">*</span>
             </label>
             <input id="email" name="email" type="email" className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" value={form.email} onChange={handleChange} required />
 
             <label className="mt-4 block text-sm font-medium text-slate-700" htmlFor="phone">
-              Phone number
+              Phone number <span className="text-rose-500">*</span>
             </label>
             <input id="phone" name="phone" className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" value={form.phone} onChange={handleChange} required />
 
             <label className="mt-4 block text-sm font-medium text-slate-700" htmlFor="nin">
-              NIN
+              NIN <span className="text-rose-500">*</span>
             </label>
             <input id="nin" name="nin" inputMode="numeric" maxLength={11} className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" value={form.nin} onChange={handleChange} required />
 
             <label className="mt-4 block text-sm font-medium text-slate-700" htmlFor="bvn">
-              BVN
+              BVN <span className="text-rose-500">*</span>
             </label>
             <input id="bvn" name="bvn" inputMode="numeric" maxLength={11} className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" value={form.bvn} onChange={handleChange} required />
 
             <label className="mt-4 block text-sm font-medium text-slate-700" htmlFor="password">
-              Password
+              Password <span className="text-rose-500">*</span>
             </label>
-            <input id="password" name="password" type="password" className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" value={form.password} onChange={handleChange} required />
+            <div className="relative mt-2">
+              <input id="password" name="password" type={showPassword ? 'text' : 'password'} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 pr-12" value={form.password} onChange={handleChange} required />
+              <button
+                type="button"
+                aria-label={showPassword ? 'Hide password' : 'Show password'}
+                onClick={() => setShowPassword((current) => !current)}
+                className="absolute inset-y-0 right-3 flex items-center text-slate-500 hover:text-slate-700"
+              >
+                {showPassword ? <VisibilityOff fontSize="small" /> : <Visibility fontSize="small" />}
+              </button>
+            </div>
+
+            <label className="mt-4 block text-sm font-medium text-slate-700" htmlFor="password_confirmation">
+              Confirm password <span className="text-rose-500">*</span>
+            </label>
+            <div className="relative mt-2">
+              <input id="password_confirmation" name="password_confirmation" type={showPasswordConfirmation ? 'text' : 'password'} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 pr-12" value={form.password_confirmation} onChange={handleChange} required />
+              <button
+                type="button"
+                aria-label={showPasswordConfirmation ? 'Hide confirmed password' : 'Show confirmed password'}
+                onClick={() => setShowPasswordConfirmation((current) => !current)}
+                className="absolute inset-y-0 right-3 flex items-center text-slate-500 hover:text-slate-700"
+              >
+                {showPasswordConfirmation ? <VisibilityOff fontSize="small" /> : <Visibility fontSize="small" />}
+              </button>
+            </div>
 
             <label className="mt-4 block text-sm font-medium text-slate-700" htmlFor="pin">
-              4-digit transfer PIN
+              4-digit transfer PIN <span className="text-rose-500">*</span>
             </label>
-            <input id="pin" name="pin" type="password" inputMode="numeric" maxLength={4} pattern="\d{4}" className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" value={form.pin} onChange={handleChange} required />
+            <div className="relative mt-2">
+              <input id="pin" name="pin" type={showPin ? 'text' : 'password'} inputMode="numeric" maxLength={4} pattern="\d{4}" className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 pr-12" value={form.pin} onChange={handleChange} required />
+              <button
+                type="button"
+                aria-label={showPin ? 'Hide transfer PIN' : 'Show transfer PIN'}
+                onClick={() => setShowPin((current) => !current)}
+                className="absolute inset-y-0 right-3 flex items-center text-slate-500 hover:text-slate-700"
+              >
+                {showPin ? <VisibilityOff fontSize="small" /> : <Visibility fontSize="small" />}
+              </button>
+            </div>
 
             <label className="mt-4 block text-sm font-medium text-slate-700" htmlFor="pin_confirmation">
-              Confirm 4-digit transfer PIN
+              Confirm 4-digit transfer PIN <span className="text-rose-500">*</span>
             </label>
-            <input id="pin_confirmation" name="pin_confirmation" type="password" inputMode="numeric" maxLength={4} pattern="\d{4}" className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" value={form.pin_confirmation} onChange={handleChange} required />
+            <div className="relative mt-2">
+              <input id="pin_confirmation" name="pin_confirmation" type={showPinConfirmation ? 'text' : 'password'} inputMode="numeric" maxLength={4} pattern="\d{4}" className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 pr-12" value={form.pin_confirmation} onChange={handleChange} required />
+              <button
+                type="button"
+                aria-label={showPinConfirmation ? 'Hide confirmed transfer PIN' : 'Show confirmed transfer PIN'}
+                onClick={() => setShowPinConfirmation((current) => !current)}
+                className="absolute inset-y-0 right-3 flex items-center text-slate-500 hover:text-slate-700"
+              >
+                {showPinConfirmation ? <VisibilityOff fontSize="small" /> : <Visibility fontSize="small" />}
+              </button>
+            </div>
 
             {error ? <p className="mt-4 text-sm text-rose-600">{error}</p> : null}
 

@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom';
 
 import api from '../services/api';
 
+const validateEmailAddress = (value) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+
 function Login() {
   const navigate = useNavigate();
   const [email, setEmail] = useState('demo@sirkome.com');
@@ -20,6 +22,18 @@ function Login() {
     event.preventDefault();
     setLoading(true);
     setError('');
+
+    if (!email.trim() || !validateEmailAddress(email)) {
+      setError('Please enter a valid email address.');
+      setLoading(false);
+      return;
+    }
+
+    if (!password.trim()) {
+      setError('Password is required.');
+      setLoading(false);
+      return;
+    }
 
     try {
       const response = await api.post('/auth/login', { email, password });
@@ -70,7 +84,7 @@ function Login() {
             <h2 className="mt-2 text-2xl font-semibold text-slate-900">Sign in to your account</h2>
 
             <label className="mt-6 block text-sm font-medium text-slate-700" htmlFor="email">
-              Email
+              Email <span className="text-rose-500">*</span>
             </label>
             <input
               id="email"
@@ -82,7 +96,7 @@ function Login() {
             />
 
             <label className="mt-4 block text-sm font-medium text-slate-700" htmlFor="password">
-              Password
+              Password <span className="text-rose-500">*</span>
             </label>
             <input
               id="password"
