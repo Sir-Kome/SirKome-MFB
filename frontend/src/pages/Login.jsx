@@ -1,3 +1,5 @@
+import Visibility from '@mui/icons-material/Visibility';
+import VisibilityOff from '@mui/icons-material/VisibilityOff';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
@@ -7,8 +9,9 @@ const validateEmailAddress = (value) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.
 
 function Login() {
   const navigate = useNavigate();
-  const [email, setEmail] = useState('demo@sirkome.com');
-  const [password, setPassword] = useState('demo1234');
+  const [email, setEmail] = useState('komeisioro+admin@gmail.com');
+  const [password, setPassword] = useState('admin1234');
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -72,9 +75,9 @@ function Login() {
           </p>
 
           <div className="mt-8 rounded-3xl border border-white/10 bg-white/10 p-4 backdrop-blur">
-            <p className="text-sm text-slate-300">Demo access</p>
-            <p className="mt-2 text-lg font-semibold">Email: demo@sirkome.com</p>
-            <p className="text-sm text-slate-400">Password: demo1234</p>
+            <p className="text-sm text-slate-300">Admin access</p>
+            <p className="mt-2 text-lg font-semibold">Email: komeisioro+admin@gmail.com</p>
+            <p className="text-sm text-slate-400">Password: admin1234</p>
           </div>
         </div>
 
@@ -98,14 +101,24 @@ function Login() {
             <label className="mt-4 block text-sm font-medium text-slate-700" htmlFor="password">
               Password <span className="text-rose-500">*</span>
             </label>
-            <input
-              id="password"
-              className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 outline-none transition focus:border-cyan-500 focus:bg-white"
-              placeholder="Enter your password"
-              type="password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-            />
+            <div className="relative mt-2">
+              <input
+                id="password"
+                className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 pr-12 outline-none transition focus:border-cyan-500 focus:bg-white"
+                placeholder="Enter your password"
+                type={showPassword ? 'text' : 'password'}
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+              />
+              <button
+                type="button"
+                aria-label={showPassword ? 'Hide password' : 'Show password'}
+                onClick={() => setShowPassword((current) => !current)}
+                className="absolute inset-y-0 right-3 flex items-center text-slate-500 hover:text-slate-700"
+              >
+                {showPassword ? <VisibilityOff fontSize="small" /> : <Visibility fontSize="small" />}
+              </button>
+            </div>
 
             {error ? <p className="mt-4 text-sm text-rose-600">{error}</p> : null}
 

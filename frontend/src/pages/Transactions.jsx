@@ -8,7 +8,10 @@ import api from '../services/api';
 
 function Transactions() {
   const navigate = useNavigate();
-  const [user, setUser] = useState(null);
+  const [user] = useState(() => {
+    const storedUser = JSON.parse(localStorage.getItem('sirkome_user') || 'null');
+    return storedUser;
+  });
   const [transactions, setTransactions] = useState([]);
 
   useEffect(() => {
@@ -17,9 +20,6 @@ function Transactions() {
       navigate('/login');
       return;
     }
-
-    const storedUser = JSON.parse(localStorage.getItem('sirkome_user') || 'null');
-    setUser(storedUser);
 
     api.get('/transactions', { headers: { Authorization: `Bearer ${token}` } })
       .then((response) => {
@@ -77,7 +77,7 @@ function Transactions() {
                       </div>
                     </div>
                     <span className={`font-semibold ${item.type === 'credit' ? 'text-emerald-600' : 'text-slate-700'}`}>
-                      {item.type === 'credit' ? '+' : '-'}${item.amount.toFixed(2)}
+                      {item.type === 'credit' ? '+' : '-'}₦{item.amount.toFixed(2)}
                     </span>
                   </div>
                 ))}

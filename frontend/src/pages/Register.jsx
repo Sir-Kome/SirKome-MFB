@@ -13,7 +13,9 @@ const validateIdentity = (value) => /^\d{11}$/.test(value);
 function Register() {
   const navigate = useNavigate();
   const [form, setForm] = useState({
-    name: '',
+    first_name: '',
+    last_name: '',
+    middle_name: '',
     email: '',
     password: '',
     password_confirmation: '',
@@ -23,6 +25,8 @@ function Register() {
     pin: '',
     pin_confirmation: '',
   });
+  const [showPassword, setShowPassword] = useState(false);
+  const [showPasswordConfirmation, setShowPasswordConfirmation] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
@@ -36,24 +40,32 @@ function Register() {
       ? value.replace(/\D/g, '').slice(0, 11)
       : name === 'pin' || name === 'pin_confirmation'
         ? value.replace(/\D/g, '').slice(0, 4)
-        : value;
-
+        : name === 'phone'
+          ? value.replace(/[^\d+\s]/g, '').slice(0, 20)
+          : name === 'first_name' || name === 'last_name' || name === 'middle_name'
+            ? value.replace(/[^A-Za-z\s'-]/g, '')
+            : value;
     setForm((current) => ({ ...current, [name]: sanitizedValue }));
   };
+
+  const validateIdentity = (value) => /^\d{11}$/.test(value);
+  const validateNigerianPhone = (value) => /^(\+234|234|0)\d{10}$/.test(value.replace(/\s+/g, ''));
+  const validateName = (value) => /^[A-Za-z][A-Za-z\s'-]*$/.test(value.trim());
 
   const handleSubmit = async (event) => {
     event.preventDefault();
     setLoading(true);
     setError('');
 
-    if (!form.name.trim() || !validateName(form.name)) {
-      setError('Full name is required and must contain only letters, spaces, apostrophes, or hyphens.');
+    const fullName = `${form.first_name || ''} ${form.last_name || ''}`.trim();
+    if (!form.first_name || !form.last_name || !validateName(form.first_name) || !validateName(form.last_name)) {
+      setError('First name and last name are required and must contain only letters, spaces, apostrophes, or hyphens.');
       setLoading(false);
       return;
     }
 
-    if (!validateEmailAddress(form.email)) {
-      setError('Please enter a valid email address.');
+    if (form.middle_name && !validateName(form.middle_name)) {
+      setError('Middle name must contain only letters, spaces, apostrophes, or hyphens.');
       setLoading(false);
       return;
     }
@@ -64,26 +76,8 @@ function Register() {
       return;
     }
 
-    if (!validateIdentity(form.nin) || !validateIdentity(form.bvn)) {
-      setError('NIN and BVN must each be exactly 11 digits.');
-      setLoading(false);
-      return;
-    }
-
-    if (form.password.length < 6) {
-      setError('Password must be at least 6 characters long.');
-      setLoading(false);
-      return;
-    }
-
-    if (form.password !== form.password_confirmation) {
-      setError('The passwords do not match.');
-      setLoading(false);
-      return;
-    }
-
-    if (!/^\d{4}$/.test(form.pin)) {
-      setError('PIN must be exactly 4 digits.');
+    if (!validateIdentity(form.nin) || !validateIdentity(form.bvn) || !/^\d{4}$/.test(form.pin)) {
+      setError('NIN and BVN must each be exactly 11 digits, and PIN must be exactly 4 digits.');
       setLoading(false);
       return;
     }
@@ -94,8 +88,36 @@ function Register() {
       return;
     }
 
+    if (!form.password || form.password.length < 8) {
+      setError('Password must be at least 8 characters long.');
+      setLoading(false);
+      return;
+    }
+
+    if (form.password !== form.password_confirmation) {
+      setError('Passwords do not match.');
+      setLoading(false);
+      return;
+    }
+
+    if (!form.password || form.password.length < 8) {
+      setError('Password must be at least 8 characters long.');
+      setLoading(false);
+      return;
+    }
+
+    if (form.password !== form.password_confirmation) {
+      setError('Passwords do not match.');
+      setLoading(false);
+      return;
+    }
+
     try {
-      const { password_confirmation, pin_confirmation, ...registrationData } = form;
+      const registrationData = {
+        ...form,
+        name: fullName,
+      };
+      delete registrationData.pin_confirmation;
       const response = await api.post('/auth/register', registrationData);
       const { token, user } = response.data;
       localStorage.setItem('sirkome_token', token);
@@ -124,10 +146,25 @@ function Register() {
             <p className="text-sm font-medium uppercase tracking-[0.3em] text-cyan-600">Sign up</p>
             <h2 className="mt-2 text-2xl font-semibold text-slate-900">Create your bank account</h2>
 
-            <label className="mt-6 block text-sm font-medium text-slate-700" htmlFor="name">
-              Full name <span className="text-rose-500">*</span>
+            <div className="grid gap-4 md:grid-cols-2">
+              <div>
+                <label className="mt-6 block text-sm font-medium text-slate-700" htmlFor="first_name">
+                  First name
+                </label>
+                <input id="first_name" name="first_name" className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" value={form.first_name} onChange={handleChange} required />
+              </div>
+              <div>
+                <label className="mt-6 block text-sm font-medium text-slate-700" htmlFor="last_name">
+                  Last name
+                </label>
+                <input id="last_name" name="last_name" className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" value={form.last_name} onChange={handleChange} required />
+              </div>
+            </div>
+
+            <label className="mt-4 block text-sm font-medium text-slate-700" htmlFor="middle_name">
+              Middle name (optional)
             </label>
-            <input id="name" name="name" className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" value={form.name} onChange={handleChange} required />
+            <input id="middle_name" name="middle_name" className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" value={form.middle_name} onChange={handleChange} />
 
             <label className="mt-4 block text-sm font-medium text-slate-700" htmlFor="email">
               Email <span className="text-rose-500">*</span>
@@ -166,6 +203,21 @@ function Register() {
 
             <label className="mt-4 block text-sm font-medium text-slate-700" htmlFor="password_confirmation">
               Confirm password <span className="text-rose-500">*</span>
+            </label>
+            <div className="relative mt-2">
+              <input id="password" name="password" type={showPassword ? 'text' : 'password'} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 pr-12" value={form.password} onChange={handleChange} required />
+              <button
+                type="button"
+                aria-label={showPassword ? 'Hide password' : 'Show password'}
+                onClick={() => setShowPassword((current) => !current)}
+                className="absolute inset-y-0 right-3 flex items-center text-slate-500 hover:text-slate-700"
+              >
+                {showPassword ? <VisibilityOff fontSize="small" /> : <Visibility fontSize="small" />}
+              </button>
+            </div>
+
+            <label className="mt-4 block text-sm font-medium text-slate-700" htmlFor="password_confirmation">
+              Confirm password
             </label>
             <div className="relative mt-2">
               <input id="password_confirmation" name="password_confirmation" type={showPasswordConfirmation ? 'text' : 'password'} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 pr-12" value={form.password_confirmation} onChange={handleChange} required />

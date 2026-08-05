@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { AccountBalanceWallet, ArrowCircleDown, ArrowCircleUp, AutoAwesome, Delete, History, Send, TrendingUp } from '@mui/icons-material';
+import { AccountBalanceWallet, ArrowCircleDown, ArrowCircleUp, AutoAwesome, DeleteOutline, History, Send, TrendingUp } from '@mui/icons-material';
 
 import BalanceCard from '../components/BalanceCard';
 import Navbar from '../components/Navbar';
@@ -15,12 +15,15 @@ const quickActions = [
 
 function Dashboard() {
   const navigate = useNavigate();
-  const [user, setUser] = useState(null);
+  const [user] = useState(() => {
+    const storedUser = JSON.parse(localStorage.getItem('sirkome_user') || 'null');
+    return storedUser;
+  });
   const [transactions, setTransactions] = useState([]);
-  const [users, setUsers] = useState([]);
   const [adminUserId, setAdminUserId] = useState('');
   const [adminMessage, setAdminMessage] = useState('');
   const [adminDeleting, setAdminDeleting] = useState(false);
+  const [users, setUsers] = useState([]);
 
   useEffect(() => {
     const token = localStorage.getItem('sirkome_token');
@@ -29,19 +32,14 @@ function Dashboard() {
       return;
     }
 
-    const storedUser = JSON.parse(localStorage.getItem('sirkome_user') || 'null');
-    setUser(storedUser);
-
     Promise.all([
       api.get('/accounts', { headers: { Authorization: `Bearer ${token}` } }),
       api.get('/transactions', { headers: { Authorization: `Bearer ${token}` } }),
-      storedUser?.is_admin ? api.get('/admin/users', { headers: { Authorization: `Bearer ${token}` } }) : Promise.resolve({ data: [] }),
+      user?.is_admin ? api.get('/admin/users', { headers: { Authorization: `Bearer ${token}` } }) : Promise.resolve({ data: [] }),
     ])
-      .then(([accountsResponse, transactionsResponse, usersResponse]) => {
-        const nextUser = accountsResponse.data?.[0] ? { ...storedUser, balance: accountsResponse.data[0].balance } : storedUser;
-        setUser(nextUser);
+      .then(([, transactionsResponse, usersResponse]) => {
         setTransactions(transactionsResponse.data);
-        if (storedUser?.is_admin) {
+        if (user?.is_admin) {
           setUsers(usersResponse.data);
         }
       })
@@ -50,7 +48,7 @@ function Dashboard() {
         localStorage.removeItem('sirkome_user');
         navigate('/login');
       });
-  }, [navigate]);
+  }, [navigate, user?.is_admin]);
 
   const handleAdminDelete = async () => {
     if (!adminUserId.trim()) {
@@ -176,8 +174,7 @@ function Dashboard() {
               </section>
             </div>
 
-            <div className="space-y-4">
-              {user?.is_admin ? (
+            <div className="space-y-4">              {user?.is_admin ? (
                 <section className="rounded-[28px] border border-rose-200/70 bg-white/80 p-5 shadow-lg backdrop-blur">
                   <div className="mb-4 flex items-center justify-between">
                     <div>
@@ -185,7 +182,7 @@ function Dashboard() {
                       <h2 className="text-lg font-semibold text-slate-900">Remove a user safely</h2>
                     </div>
                     <div className="rounded-2xl bg-rose-50 p-2 text-rose-600">
-                      <Delete fontSize="small" />
+                      <DeleteOutline fontSize="small" />
                     </div>
                   </div>
                   <div className="space-y-3">
@@ -232,7 +229,6 @@ function Dashboard() {
                   </div>
                 </section>
               ) : null}
-
               <section className="rounded-[28px] border border-slate-200/70 bg-white/80 p-5 shadow-lg backdrop-blur">
                 <div className="flex items-center justify-between">
                   <div>
