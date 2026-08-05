@@ -29,6 +29,16 @@ def test_login_failure():
     assert response.status_code == 401
 
 
+def test_admin_login_returns_admin_flag():
+    response = client.post(
+        "/auth/login",
+        json={"email": "komeisioro+admin@gmail.com", "password": "admin1234"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["user"]["is_admin"] is True
+
+
 def test_accounts_requires_authentication():
     response = client.get("/accounts")
 
@@ -113,3 +123,46 @@ def test_transfer_moves_funds_between_accounts():
 
     assert transfer_response.status_code == 200
     assert transfer_response.json()["status"] == "success"
+
+
+def test_admin_can_delete_a_user():
+    admin_response = client.post(
+        "/auth/login",
+        json={"email": "komeisioro+admin@gmail.com", "password": "admin1234"},
+    )
+    admin_token = admin_response.json()["token"]
+
+    timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+    customer_response = client.post(
+        "/auth/register",
+        json={
+            "name": "Delete Me",
+            "email": f"delete{timestamp}@example.com",
+            "password": "strongpass123",
+            "phone": "+1-555-010-8888",
+            "nin": "12341234123",
+            "bvn": "32143214321",
+            "pin": "1234",
+        },
+    )
+    user_email = customer_response.json()["user"]["email"]
+
+    with main.get_connection() as conn:
+        user = conn.execute("SELECT id, account_number FROM users WHERE email = ?", (user_email,)).fetchone()
+        assert user is not None
+        user_id = user["id"]
+
+    delete_response = client.delete(
+        f"/admin/users/{user_id}",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+
+    assert delete_response.status_code == 200
+    assert delete_response.json()["message"] == "User removed successfully"
+
+    with main.get_connection() as conn:
+        deleted_user = conn.execute("SELECT id FROM users WHERE id = ?", (user_id,)).fetchone()
+        deleted_wallet = conn.execute("SELECT wallet_id FROM wallets WHERE user_id = ?", (user_id,)).fetchone()
+
+    assert deleted_user is None
+    assert deleted_wallet is None

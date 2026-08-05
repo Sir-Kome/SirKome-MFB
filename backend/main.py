@@ -67,6 +67,7 @@ class UserProfile(BaseModel):
     account_number: str
     balance: float
     currency: str = "USD"
+    is_admin: bool = False
 
 
 class AccountResponse(BaseModel):
@@ -303,6 +304,20 @@ def get_wallet_by_account(account_number: str):
         return conn.execute("SELECT * FROM wallets WHERE account_number = ?", (normalized_account,)).fetchone()
 
 
+def require_authenticated_admin(credentials: HTTPAuthorizationCredentials | None) -> sqlite3.Row:
+    if not credentials:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+
+    current_user = get_user_by_token(credentials.credentials)
+    if not current_user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+
+    if current_user["is_admin"] != 1:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
+
+    return current_user
+
+
 def create_user_record(name: str, email: str, password: str, phone: str, nin: str, bvn: str, pin: str, is_admin: int = 0, balance: float = 0.0, account_number: str | None = None, token: str | None = None):
     account_number = account_number or generate_account_number()
     with get_connection() as conn:
@@ -377,6 +392,7 @@ def build_user_profile(user):
         "account_number": user["account_number"],
         "balance": float(user["balance"]),
         "currency": user["currency"],
+        "is_admin": bool(user["is_admin"]),
     }
 
 
@@ -454,6 +470,65 @@ def get_transactions(credentials: HTTPAuthorizationCredentials | None = Depends(
         }
         for row in rows
     ]
+
+
+@app.get("/admin/users")
+def list_users_for_admin(credentials: HTTPAuthorizationCredentials | None = Depends(security)):
+    require_authenticated_admin(credentials)
+
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT id, name, email, phone, account_number, balance, currency, is_admin FROM users ORDER BY id ASC"
+        ).fetchall()
+
+    return [
+        {
+            "id": row["id"],
+            "user_id": f"USR-{row['id']:04d}",
+            "name": row["name"],
+            "email": row["email"],
+            "phone": row["phone"],
+            "account_number": row["account_number"],
+            "balance": float(row["balance"]),
+            "currency": row["currency"],
+            "is_admin": bool(row["is_admin"]),
+        }
+        for row in rows
+    ]
+
+
+@app.delete("/admin/users/{user_identifier}")
+def delete_user_for_admin(user_identifier: str, credentials: HTTPAuthorizationCredentials | None = Depends(security)):
+    admin_user = require_authenticated_admin(credentials)
+    normalized_identifier = user_identifier.strip()
+
+    with get_connection() as conn:
+        target_user = None
+
+        if normalized_identifier.upper().startswith("USR-"):
+            suffix = normalized_identifier[4:]
+            if suffix.isdigit():
+                target_user = conn.execute("SELECT * FROM users WHERE id = ?", (int(suffix),)).fetchone()
+        elif normalized_identifier.isdigit():
+            target_user = conn.execute("SELECT * FROM users WHERE id = ?", (int(normalized_identifier),)).fetchone()
+        else:
+            target_user = conn.execute(
+                "SELECT * FROM users WHERE account_number = ? OR LOWER(email) = ?",
+                (resolve_account_number(normalized_identifier), normalize_email(normalized_identifier)),
+            ).fetchone()
+
+        if not target_user:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+        if target_user["id"] == admin_user["id"]:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admins cannot remove their own account")
+
+        conn.execute("DELETE FROM wallets WHERE user_id = ?", (target_user["id"],))
+        conn.execute("DELETE FROM transactions WHERE account_number = ?", (target_user["account_number"],))
+        conn.execute("DELETE FROM users WHERE id = ?", (target_user["id"],))
+        conn.commit()
+
+    return {"message": "User removed successfully"}
 
 
 @app.post("/transfer", response_model=TransferResponse)
