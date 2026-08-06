@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { AccountBalanceWallet, ArrowCircleDown, ArrowCircleUp, AutoAwesome, DeleteOutline, History, Send, TrendingUp } from '@mui/icons-material';
+import { Navigate, useNavigate } from 'react-router-dom';
+import { AccountBalanceWallet, ArrowCircleDown, ArrowCircleUp, AutoAwesome, Delete, History, Send, TrendingUp } from '@mui/icons-material';
 
 import BalanceCard from '../components/BalanceCard';
 import Navbar from '../components/Navbar';
@@ -16,8 +16,11 @@ const quickActions = [
 function Dashboard() {
   const navigate = useNavigate();
   const [user] = useState(() => {
-    const storedUser = JSON.parse(localStorage.getItem('sirkome_user') || 'null');
-    return storedUser;
+    try {
+      return JSON.parse(localStorage.getItem('sirkome_user') || 'null');
+    } catch {
+      return null;
+    }
   });
   const [transactions, setTransactions] = useState([]);
   const [adminUserId, setAdminUserId] = useState('');
@@ -27,7 +30,9 @@ function Dashboard() {
 
   useEffect(() => {
     const token = localStorage.getItem('sirkome_token');
-    if (!token) {
+    if (!token || !user) {
+      localStorage.removeItem('sirkome_token');
+      localStorage.removeItem('sirkome_user');
       navigate('/login');
       return;
     }
@@ -35,11 +40,11 @@ function Dashboard() {
     Promise.all([
       api.get('/accounts', { headers: { Authorization: `Bearer ${token}` } }),
       api.get('/transactions', { headers: { Authorization: `Bearer ${token}` } }),
-      user?.is_admin ? api.get('/admin/users', { headers: { Authorization: `Bearer ${token}` } }) : Promise.resolve({ data: [] }),
+      user.is_admin ? api.get('/admin/users', { headers: { Authorization: `Bearer ${token}` } }) : Promise.resolve({ data: [] }),
     ])
       .then(([, transactionsResponse, usersResponse]) => {
         setTransactions(transactionsResponse.data);
-        if (user?.is_admin) {
+        if (user.is_admin) {
           setUsers(usersResponse.data);
         }
       })
@@ -48,7 +53,7 @@ function Dashboard() {
         localStorage.removeItem('sirkome_user');
         navigate('/login');
       });
-  }, [navigate, user?.is_admin]);
+  }, [navigate, user]);
 
   const handleAdminDelete = async () => {
     if (!adminUserId.trim()) {
@@ -87,7 +92,7 @@ function Dashboard() {
   };
 
   if (!user) {
-    return null;
+    return <Navigate to="/login" replace />;
   }
 
   return (
@@ -182,7 +187,7 @@ function Dashboard() {
                       <h2 className="text-lg font-semibold text-slate-900">Remove a user safely</h2>
                     </div>
                     <div className="rounded-2xl bg-rose-50 p-2 text-rose-600">
-                      <DeleteOutline fontSize="small" />
+                      <Delete fontSize="small" />
                     </div>
                   </div>
                   <div className="space-y-3">

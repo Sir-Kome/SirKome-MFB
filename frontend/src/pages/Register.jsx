@@ -29,8 +29,6 @@ function Register() {
   const [showPasswordConfirmation, setShowPasswordConfirmation] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const [showPassword, setShowPassword] = useState(false);
-  const [showPasswordConfirmation, setShowPasswordConfirmation] = useState(false);
   const [showPin, setShowPin] = useState(false);
   const [showPinConfirmation, setShowPinConfirmation] = useState(false);
 
