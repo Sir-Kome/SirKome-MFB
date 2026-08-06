@@ -299,6 +299,8 @@ def ensure_user_columns():
                 """
             )
             for row in rows:
+                resolved_user_id = row["user_id"] or f"USR-{uuid.uuid4().hex[:12].upper()}"
+                resolved_wallet_id = row["wallet_id"] or resolved_user_id
                 conn.execute(
                     """
                     INSERT INTO users_new (id, user_id, name, email, password, phone, account_number, wallet_id, currency, is_admin, token, nin, bvn, pin_hash)
@@ -306,13 +308,13 @@ def ensure_user_columns():
                     """,
                     (
                         row["id"],
-                        row["user_id"],
+                        resolved_user_id,
                         row["name"],
                         row["email"],
                         row["password"],
                         row["phone"],
                         row["account_number"],
-                        row["wallet_id"] or row["user_id"],
+                        resolved_wallet_id,
                         row["currency"],
                         row["is_admin"],
                         row["token"],
@@ -452,6 +454,20 @@ def get_wallet_by_account(account_number: str):
     normalized_account = resolve_account_number(account_number)
     with get_connection() as conn:
         return conn.execute("SELECT * FROM wallets WHERE account_number = ?", (normalized_account,)).fetchone()
+
+
+def require_authenticated_admin(credentials: HTTPAuthorizationCredentials | None) -> sqlite3.Row:
+    if not credentials:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+
+    current_user = get_user_by_token(credentials.credentials)
+    if not current_user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+
+    if current_user["is_admin"] != 1:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
+
+    return current_user
 
 
 def send_email(to_address: str, subject: str, body: str) -> bool:
@@ -714,7 +730,20 @@ def list_users_for_admin(credentials: HTTPAuthorizationCredentials | None = Depe
 
     with get_connection() as conn:
         rows = conn.execute(
-            "SELECT id, name, email, phone, account_number, balance, currency, is_admin FROM users ORDER BY id ASC"
+            """
+            SELECT
+                u.id,
+                u.name,
+                u.email,
+                u.phone,
+                u.account_number,
+                COALESCE(w.wallet_balance, 0.0) AS balance,
+                u.currency,
+                u.is_admin
+            FROM users AS u
+            LEFT JOIN wallets AS w ON w.account_number = u.account_number
+            ORDER BY u.id ASC
+            """
         ).fetchall()
 
     return [
