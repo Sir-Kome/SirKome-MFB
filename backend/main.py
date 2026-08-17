@@ -3,6 +3,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import sqlite3
 import time
 import uuid
@@ -11,7 +12,7 @@ from pathlib import Path
 import smtplib
 from email.message import EmailMessage
 
-from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
@@ -89,6 +90,11 @@ class TransferRequest(BaseModel):
     pin: str | None = None
 
 
+class FreezeUserRequest(BaseModel):
+    is_frozen: bool
+    reason: str | None = None
+
+
 class UserProfile(BaseModel):
     name: str
     email: str
@@ -97,6 +103,8 @@ class UserProfile(BaseModel):
     balance: float
     currency: str = DEFAULT_CURRENCY
     is_admin: bool = False
+    is_frozen: bool = False
+    freeze_reason: str | None = None
 
 
 class AccountResponse(BaseModel):
@@ -115,6 +123,10 @@ class TransactionResponse(BaseModel):
 
 class LoginResponse(BaseModel):
     token: str
+    user: UserProfile
+
+
+class RegisterResponse(BaseModel):
     user: UserProfile
 
 
@@ -159,7 +171,9 @@ def init_db():
                 token TEXT,
                 nin TEXT,
                 bvn TEXT,
-                pin_hash TEXT
+                pin_hash TEXT,
+                is_frozen INTEGER NOT NULL DEFAULT 0,
+                freeze_reason TEXT NOT NULL DEFAULT ''
             )
             """
         )
@@ -274,6 +288,10 @@ def ensure_user_columns():
             conn.execute("ALTER TABLE users ADD COLUMN user_id TEXT")
         if "wallet_id" not in columns:
             conn.execute("ALTER TABLE users ADD COLUMN wallet_id TEXT")
+        if "is_frozen" not in columns:
+            conn.execute("ALTER TABLE users ADD COLUMN is_frozen INTEGER NOT NULL DEFAULT 0")
+        if "freeze_reason" not in columns:
+            conn.execute("ALTER TABLE users ADD COLUMN freeze_reason TEXT NOT NULL DEFAULT ''")
         if "balance" in columns:
             rows = conn.execute(
                 "SELECT id, user_id, name, email, password, phone, account_number, wallet_id, currency, is_admin, token, nin, bvn, pin_hash FROM users"
@@ -425,6 +443,32 @@ def normalize_email(email: str) -> str:
     return email.strip().lower()
 
 
+def validate_email_address(email: str) -> str:
+    normalized_email = normalize_email(email)
+    if not normalized_email or not re.fullmatch(r"^[^\s@]+@[^\s@]+\.[^\s@]+$", normalized_email):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Please enter a valid email address")
+    return normalized_email
+
+
+def validate_password(password: str) -> str:
+    if not password or len(password) < 8:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Password must be at least 8 characters long and include at least one number and one special character",
+        )
+    if not any(char.isdigit() for char in password):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Password must be at least 8 characters long and include at least one number and one special character",
+        )
+    if not any(not char.isalnum() for char in password):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Password must be at least 8 characters long and include at least one number and one special character",
+        )
+    return password
+
+
 def get_user_by_email(email: str):
     normalized_email = normalize_email(email)
     with get_connection() as conn:
@@ -514,16 +558,16 @@ def notify_user_by_email(to_address: str, subject: str, body: str) -> bool:
     return sent
 
 
-def create_user_record(name: str, email: str, password: str, phone: str, nin: str, bvn: str, pin: str, is_admin: int = 0, balance: float = 0.0, account_number: str | None = None, token: str | None = None):
+def create_user_record(name: str, email: str, password: str, phone: str, nin: str, bvn: str, pin: str, is_admin: int = 0, balance: float = 0.0, account_number: str | None = None, token: str | None = None, is_frozen: int = 0, freeze_reason: str = ""):
     account_number = account_number or generate_account_number()
     with get_connection() as conn:
         user_id_val = f"USR-{uuid.uuid4().hex[:12].upper()}"
         cursor = conn.execute(
             """
-            INSERT INTO users (user_id, name, email, password, phone, account_number, currency, is_admin, token, nin, bvn, pin_hash, wallet_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO users (user_id, name, email, password, phone, account_number, currency, is_admin, token, nin, bvn, pin_hash, wallet_id, is_frozen, freeze_reason)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (user_id_val, name, email, hash_password(password), phone, account_number, DEFAULT_CURRENCY, is_admin, None, nin, bvn, hash_pin(pin), user_id_val),
+            (user_id_val, name, email, hash_password(password), phone, account_number, DEFAULT_CURRENCY, is_admin, None, nin, bvn, hash_pin(pin), user_id_val, is_frozen, freeze_reason),
         )
         conn.commit()
         user_id = cursor.lastrowid
@@ -567,7 +611,7 @@ def seed_default_users():
     alias_admin_exists = get_user_by_email("komeisioro+admin@gmail.com")
     if not alias_admin_exists:
         create_user_record(
-            name="Admin User Alias",
+            name="Admin User",
             email="komeisioro+admin@gmail.com",
             password="admin1234",
             phone="+1-555-010-0001",
@@ -582,7 +626,7 @@ def seed_default_users():
     alias_demo_exists = get_user_by_email("komeisioro+demo@gmail.com")
     if not alias_demo_exists:
         create_user_record(
-            name="Kome Isioro Alias",
+            name="Kome Isioro",
             email="komeisioro+demo@gmail.com",
             password="demo1234",
             phone="+1 (555) 010-4821",
@@ -628,6 +672,8 @@ def build_user_profile(user):
         "balance": float(wallet["wallet_balance"] if wallet else 0.0),
         "currency": DEFAULT_CURRENCY,
         "is_admin": bool(user["is_admin"]),
+        "is_frozen": bool(user["is_frozen"] if "is_frozen" in user.keys() else 0),
+        "freeze_reason": user["freeze_reason"] if "freeze_reason" in user.keys() and user["freeze_reason"] else None,
     }
 
 
@@ -644,13 +690,18 @@ def login(payload: LoginRequest):
     if not user or user["password"] != hash_password(payload.password):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 
+    if user["is_frozen"] if "is_frozen" in user.keys() else 0:
+        reason = user["freeze_reason"] if "freeze_reason" in user.keys() and user["freeze_reason"] else "No reason provided"
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"Your account has been frozen. Reason: {reason}")
+
     token = create_access_token(user["id"])
     return build_auth_response(user, token)
 
 
-@app.post("/auth/register", response_model=LoginResponse)
+@app.post("/auth/register", response_model=RegisterResponse)
 def register(payload: RegisterRequest):
-    if get_user_by_email(payload.email):
+    normalized_email = validate_email_address(payload.email)
+    if get_user_by_email(normalized_email):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already exists")
 
     first_name = (payload.first_name or "").strip()
@@ -669,13 +720,13 @@ def register(payload: RegisterRequest):
     phone = validate_phone_number(payload.phone)
     nin = validate_identity_number(payload.nin, "NIN")
     bvn = validate_identity_number(payload.bvn, "BVN")
+    password = validate_password(payload.password)
     pin = validate_pin(payload.pin or "1234")
-    user = create_user_record(name_to_store, payload.email, payload.password, phone, nin, bvn, pin)
-    token = create_access_token(user["id"])
+    user = create_user_record(name_to_store, normalized_email, password, phone, nin, bvn, pin)
     subject = "Welcome to SirKome Bank"
     body = f"Hello {user['name']},\n\nYour account {user['account_number']} has been created. Welcome to SirKome Bank.\n\nRegards,\nSirKome Team"
     notify_user_by_email(user["email"], subject, body)
-    return build_auth_response(user, token)
+    return {"user": build_user_profile(user)}
 
 
 @app.get("/accounts", response_model=list[AccountResponse])
@@ -725,31 +776,42 @@ def get_transactions(credentials: HTTPAuthorizationCredentials | None = Depends(
 
 
 @app.get("/admin/users")
-def list_users_for_admin(credentials: HTTPAuthorizationCredentials | None = Depends(security)):
+def list_users_for_admin(request: Request, credentials: HTTPAuthorizationCredentials | None = Depends(security), page: int = 1, per_page: int = 10):
     require_authenticated_admin(credentials)
 
+    page = max(1, page)
+    per_page = max(1, min(per_page, 100))
+    offset = (page - 1) * per_page
+
     with get_connection() as conn:
+        total_rows = conn.execute("SELECT COUNT(*) AS total FROM users").fetchone()
+        total = int(total_rows["total"] if total_rows else 0)
         rows = conn.execute(
             """
             SELECT
                 u.id,
+                u.user_id,
                 u.name,
                 u.email,
                 u.phone,
                 u.account_number,
                 COALESCE(w.wallet_balance, 0.0) AS balance,
                 u.currency,
-                u.is_admin
+                u.is_admin,
+                u.is_frozen,
+                u.freeze_reason
             FROM users AS u
             LEFT JOIN wallets AS w ON w.account_number = u.account_number
             ORDER BY u.id ASC
-            """
+            LIMIT ? OFFSET ?
+            """,
+            (per_page, offset),
         ).fetchall()
 
-    return [
+    items = [
         {
             "id": row["id"],
-            "user_id": f"USR-{row['id']:04d}",
+            "user_id": row["user_id"],
             "name": row["name"],
             "email": row["email"],
             "phone": row["phone"],
@@ -757,19 +819,31 @@ def list_users_for_admin(credentials: HTTPAuthorizationCredentials | None = Depe
             "balance": float(row["balance"]),
             "currency": row["currency"],
             "is_admin": bool(row["is_admin"]),
+            "is_frozen": bool(row["is_frozen"]),
+            "freeze_reason": row["freeze_reason"] or None,
         }
         for row in rows
     ]
 
+    if "page" not in request.query_params and "per_page" not in request.query_params:
+        return items
 
-@app.delete("/admin/users/{user_identifier}")
-def delete_user_for_admin(user_identifier: str, credentials: HTTPAuthorizationCredentials | None = Depends(security)):
-    admin_user = require_authenticated_admin(credentials)
+    return {
+        "page": page,
+        "per_page": per_page,
+        "total": total,
+        "pages": max(1, (total + per_page - 1) // per_page),
+        "items": items,
+    }
+
+
+@app.patch("/admin/users/{user_identifier}/freeze")
+def freeze_user_for_admin(user_identifier: str, payload: FreezeUserRequest, credentials: HTTPAuthorizationCredentials | None = Depends(security)):
+    require_authenticated_admin(credentials)
     normalized_identifier = user_identifier.strip()
 
     with get_connection() as conn:
         target_user = None
-
         if normalized_identifier.upper().startswith("USR-"):
             suffix = normalized_identifier[4:]
             if suffix.isdigit():
@@ -785,15 +859,24 @@ def delete_user_for_admin(user_identifier: str, credentials: HTTPAuthorizationCr
         if not target_user:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
-        if target_user["id"] == admin_user["id"]:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admins cannot remove their own account")
+        if target_user["is_admin"] == 1:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admins cannot be frozen")
 
-        conn.execute("DELETE FROM wallets WHERE user_id = ?", (target_user["id"],))
-        conn.execute("DELETE FROM transactions WHERE account_number = ?", (target_user["account_number"],))
-        conn.execute("DELETE FROM users WHERE id = ?", (target_user["id"],))
+        is_frozen = bool(payload.is_frozen)
+        reason = (payload.reason or "").strip()
+        if is_frozen and not reason:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="A freeze reason is required when freezing an account")
+
+        conn.execute(
+            "UPDATE users SET is_frozen = ?, freeze_reason = ? WHERE id = ?",
+            (1 if is_frozen else 0, reason if is_frozen else "", target_user["id"]),
+        )
         conn.commit()
+        target_user = conn.execute("SELECT * FROM users WHERE id = ?", (target_user["id"],)).fetchone()
 
-    return {"message": "User removed successfully"}
+    user_profile = build_user_profile(target_user)
+    status_message = "User frozen successfully" if is_frozen else "User unfrozen successfully"
+    return {"status": "success", "message": status_message, "user": user_profile}
 
 
 @app.post("/transfer", response_model=TransferResponse)
@@ -887,66 +970,6 @@ def update_profile(payload: ProfileUpdateRequest, credentials: HTTPAuthorization
         pass
 
     return {"status": "success", "message": "Profile updated"}
-
-
-@app.get("/admin/users")
-def list_users(credentials: HTTPAuthorizationCredentials | None = Depends(security)):
-    if not credentials:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
-
-    current_user = get_user_by_token(credentials.credentials)
-    if not current_user:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
-    if current_user["is_admin"] != 1:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only admins can view users")
-
-    with get_connection() as conn:
-        rows = conn.execute(
-            "SELECT id, user_id, name, email, account_number, phone, currency, is_admin FROM users ORDER BY id ASC"
-        ).fetchall()
-
-    return [
-        {
-            "id": row["id"],
-            "user_id": row["user_id"],
-            "name": row["name"],
-            "email": row["email"],
-            "account_number": row["account_number"],
-            "phone": row["phone"],
-            "balance": float(get_wallet_by_account(row["account_number"])["wallet_balance"] if get_wallet_by_account(row["account_number"]) else 0.0),
-            "currency": row["currency"],
-            "is_admin": bool(row["is_admin"]),
-        }
-        for row in rows
-    ]
-
-
-@app.delete("/admin/users/{user_id}")
-def delete_user(user_id: str, credentials: HTTPAuthorizationCredentials | None = Depends(security)):
-    if not credentials:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
-
-    current_user = get_user_by_token(credentials.credentials)
-    if not current_user:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
-    if current_user["is_admin"] != 1:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only admins can remove users")
-
-    target_user = conn = None
-    with get_connection() as conn:
-        target_user = conn.execute("SELECT * FROM users WHERE user_id = ? OR id = ?", (user_id, user_id)).fetchone()
-        if not target_user:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
-
-        if target_user["is_admin"] == 1 and target_user["id"] != current_user["id"]:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin users cannot be removed this way")
-
-        conn.execute("DELETE FROM wallets WHERE user_id = ?", (target_user["user_id"],))
-        conn.execute("DELETE FROM transactions WHERE account_number = ?", (target_user["account_number"],))
-        conn.execute("DELETE FROM users WHERE user_id = ?", (target_user["user_id"],))
-        conn.commit()
-
-    return {"status": "success", "message": "User removed successfully"}
 
 
 @app.post("/debug/send-test-email")
