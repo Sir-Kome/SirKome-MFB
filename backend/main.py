@@ -11,6 +11,7 @@ from datetime import datetime
 from pathlib import Path
 import smtplib
 from email.message import EmailMessage
+from collections import defaultdict
 
 from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -31,6 +32,9 @@ DB_PATH = os.path.join(os.path.dirname(__file__), "sirkome_bank.db")
 SECRET_KEY = os.getenv("SIRKOME_SECRET_KEY", "dev-secret-change-me")
 DEFAULT_ACCESS_TOKEN_TTL_SECONDS = 30 * 60
 DEFAULT_CURRENCY = "NGN"
+VERIFICATION_CODE_TTL_SECONDS = 15 * 60
+VERIFICATION_CACHE: dict[str, dict[str, object]] = {}
+LAST_EMAIL_ERROR = ""
 
 
 def load_env_file():
@@ -88,6 +92,7 @@ class TransferRequest(BaseModel):
     amount: float
     description: str = "Transfer"
     pin: str | None = None
+    idempotency_key: str | None = None
 
 
 class FreezeUserRequest(BaseModel):
@@ -121,6 +126,14 @@ class TransactionResponse(BaseModel):
     date: str
 
 
+class TransactionPageResponse(BaseModel):
+    page: int
+    per_page: int
+    total: int
+    pages: int
+    items: list[TransactionResponse]
+
+
 class LoginResponse(BaseModel):
     token: str
     user: UserProfile
@@ -133,12 +146,27 @@ class RegisterResponse(BaseModel):
 class TransferResponse(BaseModel):
     status: str
     message: str
+    receipt_id: str | None = None
+    from_account: str | None = None
+    to_account: str | None = None
+    amount: float | None = None
+    description: str | None = None
+    date: str | None = None
 
 
 class ProfileUpdateRequest(BaseModel):
     name: str | None = None
     phone: str | None = None
     email: str | None = None
+
+
+class EmailVerificationRequest(BaseModel):
+    email: str
+
+
+class EmailCodeVerificationRequest(BaseModel):
+    email: str
+    code: str
 
 
 def get_connection():
@@ -200,6 +228,19 @@ def init_db():
                 currency TEXT NOT NULL DEFAULT 'NGN',
                 status TEXT NOT NULL DEFAULT 'active',
                 created_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS transfer_requests (
+                idempotency_key TEXT PRIMARY KEY,
+                receipt_id TEXT UNIQUE NOT NULL,
+                from_account TEXT NOT NULL,
+                to_account TEXT NOT NULL,
+                amount REAL NOT NULL,
+                description TEXT NOT NULL,
+                date TEXT NOT NULL
             )
             """
         )
@@ -426,10 +467,12 @@ def validate_pin(pin: str) -> str:
 
 def generate_account_number() -> str:
     while True:
-        suffix = datetime.now().strftime("%H%M%S")
+        suffix = datetime.now().strftime("%H%M%S%f")
         candidate = f"SK-{suffix}"
-        if not get_user_by_account(candidate):
-            return candidate
+        with get_connection() as conn:
+            existing_user = conn.execute("SELECT id FROM users WHERE account_number = ?", (candidate,)).fetchone()
+            if not existing_user:
+                return candidate
 
 
 def resolve_account_number(account_number: str) -> str:
@@ -469,10 +512,63 @@ def validate_password(password: str) -> str:
     return password
 
 
+def hash_verification_code(code: str) -> str:
+    return hashlib.sha256(code.strip().encode("utf-8")).hexdigest()
+
+
+def issue_verification_code(email: str) -> str:
+    normalized_email = normalize_email(email)
+    code = str(uuid.uuid4().int % 1000000).zfill(6)
+    expires_at = int(time.time()) + VERIFICATION_CODE_TTL_SECONDS
+    VERIFICATION_CACHE[normalized_email] = {
+        "code_hash": hash_verification_code(code),
+        "expires_at": expires_at,
+        "used": False,
+    }
+    return code
+
+
+def verify_email_code(email: str, code: str) -> bool:
+    normalized_email = normalize_email(email)
+    cached_entry = VERIFICATION_CACHE.get(normalized_email)
+    if not cached_entry:
+        return False
+    if bool(cached_entry.get("used", False)):
+        return False
+    if int(cached_entry.get("expires_at", 0)) < int(time.time()):
+        VERIFICATION_CACHE.pop(normalized_email, None)
+        return False
+    if cached_entry.get("code_hash") != hash_verification_code(code):
+        return False
+    cached_entry["used"] = True
+    return True
+
+
+def clear_verification_code(email: str) -> None:
+    VERIFICATION_CACHE.pop(normalize_email(email), None)
+
+
 def get_user_by_email(email: str):
     normalized_email = normalize_email(email)
     with get_connection() as conn:
         return conn.execute("SELECT * FROM users WHERE LOWER(email) = ?", (normalized_email,)).fetchone()
+
+
+def get_existing_registration_field(email: str, phone: str, nin: str, bvn: str):
+    with get_connection() as conn:
+        users = conn.execute("SELECT email, phone, nin, bvn FROM users").fetchall()
+
+    normalized_email = normalize_email(email)
+    for user in users:
+        stored_phone = "".join(char for char in (user["phone"] or "") if char.isdigit())
+        if (
+            normalize_email(user["email"]) == normalized_email
+            or stored_phone == phone
+            or user["nin"] == nin
+            or user["bvn"] == bvn
+        ):
+            return user
+    return None
 
 
 def get_user_by_account(account_number: str):
@@ -515,28 +611,33 @@ def require_authenticated_admin(credentials: HTTPAuthorizationCredentials | None
 
 
 def send_email(to_address: str, subject: str, body: str) -> bool:
+    global LAST_EMAIL_ERROR
+    LAST_EMAIL_ERROR = ""
     load_env_file()
 
-    smtp_host = os.getenv("SIRKOME_SMTP_HOST")
-    smtp_port = int(os.getenv("SIRKOME_SMTP_PORT", "587"))
-    smtp_user = os.getenv("SIRKOME_SMTP_USER")
-    smtp_pass = os.getenv("SIRKOME_SMTP_PASS")
+    smtp_host = (os.getenv("SIRKOME_SMTP_HOST") or "").strip()
+    smtp_port = int((os.getenv("SIRKOME_SMTP_PORT") or "587").strip())
+    smtp_user = (os.getenv("SIRKOME_SMTP_USER") or "").strip()
+    smtp_pass = (os.getenv("SIRKOME_SMTP_PASS") or "").replace(" ", "").strip()
+    from_address = (os.getenv("SIRKOME_FROM") or smtp_user).strip()
 
     # Always log the notification for audit/debug
     print({"email_to": to_address, "subject": subject, "body": body})
 
     if not smtp_host or not smtp_user or not smtp_pass:
-        print("SMTP not configured: email notification skipped.")
+        LAST_EMAIL_ERROR = "SMTP host, user, or password is not configured"
+        print("SMTP not configured: email notification unavailable.")
         return False
 
-    try:
-        msg = EmailMessage()
-        msg["Subject"] = subject
-        msg["From"] = os.getenv("SIRKOME_FROM", smtp_user)
-        msg["To"] = to_address
-        msg.set_content(body)
+    msg = EmailMessage()
+    msg["Subject"] = subject
+    msg["From"] = from_address
+    msg["To"] = to_address
+    msg.set_content(body)
 
-        if smtp_port == 465:
+    use_ssl = smtp_port == 465 or os.getenv("SIRKOME_SMTP_SSL", "false").strip().lower() == "true"
+    try:
+        if use_ssl:
             with smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=10) as s:
                 s.login(smtp_user, smtp_pass)
                 s.send_message(msg)
@@ -547,8 +648,21 @@ def send_email(to_address: str, subject: str, body: str) -> bool:
                 s.send_message(msg)
         return True
     except Exception as exc:
-        print("Email send failed:", exc)
-        return False
+        if smtp_port != 587:
+            LAST_EMAIL_ERROR = f"{type(exc).__name__}: {exc}"
+            print(f"Email send failed ({type(exc).__name__}): {exc}")
+            return False
+
+        try:
+            with smtplib.SMTP_SSL(smtp_host, 465, timeout=10) as s:
+                s.login(smtp_user, smtp_pass)
+                s.send_message(msg)
+            print("Email sent using SMTP SSL fallback on port 465.")
+            return True
+        except Exception as fallback_exc:
+            LAST_EMAIL_ERROR = f"STARTTLS: {type(exc).__name__}: {exc}; SSL fallback: {type(fallback_exc).__name__}: {fallback_exc}"
+            print(f"Email send failed ({type(fallback_exc).__name__}): {fallback_exc}")
+            return False
 
 
 def notify_user_by_email(to_address: str, subject: str, body: str) -> bool:
@@ -698,11 +812,40 @@ def login(payload: LoginRequest):
     return build_auth_response(user, token)
 
 
+@app.post("/auth/send-verification")
+def send_verification(payload: EmailVerificationRequest):
+    normalized_email = validate_email_address(payload.email)
+    if get_user_by_email(normalized_email):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Existing user found. Do you want to login?")
+
+    code = issue_verification_code(normalized_email)
+    response = {"status": "success", "message": "Verification code sent to your email"}
+    sent = notify_user_by_email(
+        normalized_email,
+        "Verify your SirKome Bank email",
+        f"Your verification code is: {code}\n\nThis code expires in 15 minutes. Enter it to complete your account creation.",
+    )
+    smtp_configured = all(
+        os.getenv(name)
+        for name in ("SIRKOME_SMTP_HOST", "SIRKOME_SMTP_USER", "SIRKOME_SMTP_PASS")
+    )
+    if not sent and (smtp_configured or os.getenv("SIRKOME_ENV") == "production"):
+        clear_verification_code(normalized_email)
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Unable to send verification email. Check the SMTP configuration.")
+    return response
+
+
+@app.post("/auth/verify-email")
+def verify_email(payload: EmailCodeVerificationRequest):
+    normalized_email = validate_email_address(payload.email)
+    if not verify_email_code(normalized_email, payload.code):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired verification code")
+    return {"status": "success", "message": "Email verified successfully"}
+
+
 @app.post("/auth/register", response_model=RegisterResponse)
 def register(payload: RegisterRequest):
     normalized_email = validate_email_address(payload.email)
-    if get_user_by_email(normalized_email):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already exists")
 
     first_name = (payload.first_name or "").strip()
     last_name = (payload.last_name or "").strip()
@@ -722,7 +865,20 @@ def register(payload: RegisterRequest):
     bvn = validate_identity_number(payload.bvn, "BVN")
     password = validate_password(payload.password)
     pin = validate_pin(payload.pin or "1234")
+
+    existing_user = get_existing_registration_field(normalized_email, phone, nin, bvn)
+    if existing_user:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Existing user found. Do you want to login?")
+
+    cached_entry = VERIFICATION_CACHE.get(normalized_email)
+    if not cached_entry or not bool(cached_entry.get("used", False)):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Please verify your email before creating an account")
+    if int(cached_entry.get("expires_at", 0)) < int(time.time()):
+        clear_verification_code(normalized_email)
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Verification code expired. Please request a new one")
+
     user = create_user_record(name_to_store, normalized_email, password, phone, nin, bvn, pin)
+    clear_verification_code(normalized_email)
     subject = "Welcome to SirKome Bank"
     body = f"Hello {user['name']},\n\nYour account {user['account_number']} has been created. Welcome to SirKome Bank.\n\nRegards,\nSirKome Team"
     notify_user_by_email(user["email"], subject, body)
@@ -749,8 +905,8 @@ def get_accounts(credentials: HTTPAuthorizationCredentials | None = Depends(secu
     }]
 
 
-@app.get("/transactions", response_model=list[TransactionResponse])
-def get_transactions(credentials: HTTPAuthorizationCredentials | None = Depends(security)):
+@app.get("/transactions", response_model=list[TransactionResponse] | TransactionPageResponse)
+def get_transactions(request: Request, credentials: HTTPAuthorizationCredentials | None = Depends(security), page: int = 1, per_page: int = 10):
     if not credentials:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
 
@@ -758,13 +914,22 @@ def get_transactions(credentials: HTTPAuthorizationCredentials | None = Depends(
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
 
+    page = max(1, page)
+    per_page = max(1, min(per_page, 100))
+    offset = (page - 1) * per_page
+
     with get_connection() as conn:
-        rows = conn.execute(
-            "SELECT * FROM transactions WHERE account_number = ? ORDER BY id DESC LIMIT 5",
+        total_row = conn.execute(
+            "SELECT COUNT(*) AS total FROM transactions WHERE account_number = ?",
             (user["account_number"],),
+        ).fetchone()
+        total = int(total_row["total"] if total_row else 0)
+        rows = conn.execute(
+            "SELECT * FROM transactions WHERE account_number = ? ORDER BY id DESC LIMIT ? OFFSET ?",
+            (user["account_number"], per_page, offset),
         ).fetchall()
 
-    return [
+    items = [
         {
             "type": row["type"],
             "amount": float(row["amount"]),
@@ -773,6 +938,17 @@ def get_transactions(credentials: HTTPAuthorizationCredentials | None = Depends(
         }
         for row in rows
     ]
+
+    if "page" not in request.query_params and "per_page" not in request.query_params:
+        return items
+
+    return {
+        "page": page,
+        "per_page": per_page,
+        "total": total,
+        "pages": max(1, (total + per_page - 1) // per_page),
+        "items": items,
+    }
 
 
 @app.get("/admin/users")
@@ -897,6 +1073,9 @@ def transfer(payload: TransferRequest, credentials: HTTPAuthorizationCredentials
     if not sender or not receiver:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Account not found")
 
+    if sender["account_number"].strip().upper() == receiver["account_number"].strip().upper():
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="You cannot transfer money to your own account")
+
     if payload.amount <= 0:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Amount must be greater than zero")
 
@@ -911,13 +1090,63 @@ def transfer(payload: TransferRequest, credentials: HTTPAuthorizationCredentials
     if sender_wallet["wallet_balance"] < payload.amount:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Insufficient balance")
 
+    idempotency_key = (payload.idempotency_key or "").strip()
+    if idempotency_key:
+        with get_connection() as conn:
+            existing_request = conn.execute(
+                "SELECT * FROM transfer_requests WHERE idempotency_key = ?",
+                (idempotency_key,),
+            ).fetchone()
+        if existing_request:
+            return {
+                "status": "success",
+                "message": "Transfer completed",
+                "receipt_id": existing_request["receipt_id"],
+                "from_account": existing_request["from_account"],
+                "to_account": existing_request["to_account"],
+                "amount": float(existing_request["amount"]),
+                "description": existing_request["description"],
+                "date": existing_request["date"],
+            }
+
+    transfer_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    receipt_id = f"RCP-{uuid.uuid4().hex[:12].upper()}"
     with get_connection() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        if idempotency_key:
+            existing_request = conn.execute(
+                "SELECT * FROM transfer_requests WHERE idempotency_key = ?",
+                (idempotency_key,),
+            ).fetchone()
+            if existing_request:
+                conn.commit()
+                return {
+                    "status": "success",
+                    "message": "Transfer completed",
+                    "receipt_id": existing_request["receipt_id"],
+                    "from_account": existing_request["from_account"],
+                    "to_account": existing_request["to_account"],
+                    "amount": float(existing_request["amount"]),
+                    "description": existing_request["description"],
+                    "date": existing_request["date"],
+                }
+
         conn.execute("UPDATE wallets SET wallet_balance = wallet_balance - ? WHERE account_number = ?", (payload.amount, sender["account_number"]))
         conn.execute("UPDATE wallets SET wallet_balance = wallet_balance + ? WHERE account_number = ?", (payload.amount, receiver["account_number"]))
+        conn.execute(
+            "INSERT INTO transactions (account_number, type, amount, description, date, related_account) VALUES (?, ?, ?, ?, ?, ?)",
+            (sender["account_number"], "debit", payload.amount, payload.description, transfer_date, receiver["account_number"]),
+        )
+        conn.execute(
+            "INSERT INTO transactions (account_number, type, amount, description, date, related_account) VALUES (?, ?, ?, ?, ?, ?)",
+            (receiver["account_number"], "credit", payload.amount, payload.description, transfer_date, sender["account_number"]),
+        )
+        if idempotency_key:
+            conn.execute(
+                "INSERT INTO transfer_requests (idempotency_key, receipt_id, from_account, to_account, amount, description, date) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (idempotency_key, receipt_id, sender["account_number"], receiver["account_number"], payload.amount, payload.description, transfer_date),
+            )
         conn.commit()
-
-    add_transaction(sender["account_number"], "debit", payload.amount, payload.description, receiver["account_number"])
-    add_transaction(receiver["account_number"], "credit", payload.amount, payload.description, sender["account_number"])
 
     sender_email = sender["email"]
     receiver_email = receiver["email"]
@@ -932,7 +1161,16 @@ def transfer(payload: TransferRequest, credentials: HTTPAuthorizationCredentials
         f"Your account {receiver['account_number']} was credited by {payload.amount} {receiver['currency']}.\nDescription: {payload.description}",
     )
 
-    return {"status": "success", "message": "Transfer completed"}
+    return {
+        "status": "success",
+        "message": "Transfer completed",
+        "receipt_id": receipt_id,
+        "from_account": sender["account_number"],
+        "to_account": receiver["account_number"],
+        "amount": payload.amount,
+        "description": payload.description,
+        "date": transfer_date,
+    }
 
 
 @app.post("/profile/update")
@@ -985,4 +1223,10 @@ def debug_send_test_email(payload: dict):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="email is required in the JSON body")
 
     sent = send_email(email, subject, body)
-    return {"sent": sent}
+    return {
+        "sent": sent,
+        "smtp_host": (os.getenv("SIRKOME_SMTP_HOST") or "").strip(),
+        "smtp_port": (os.getenv("SIRKOME_SMTP_PORT") or "587").strip(),
+        "smtp_user": (os.getenv("SIRKOME_SMTP_USER") or "").strip(),
+        "error": LAST_EMAIL_ERROR or None,
+    }
