@@ -8,7 +8,7 @@ import api from '../services/api';
 
 function Accounts() {
 	const navigate = useNavigate();
-	const user = JSON.parse(localStorage.getItem('sirkome_user') || 'null');
+	const user = JSON.parse(sessionStorage.getItem('sirkome_user') || 'null');
 	const userAccountNumber = user?.account_number;
 	const [accounts, setAccounts] = useState([]);
 	const [visibleFields, setVisibleFields] = useState({});
@@ -21,7 +21,7 @@ function Accounts() {
 	};
 
 	useEffect(() => {
-		const token = localStorage.getItem('sirkome_token');
+		const token = sessionStorage.getItem('sirkome_token');
 		if (!token || !userAccountNumber) {
 			navigate('/login');
 			return;

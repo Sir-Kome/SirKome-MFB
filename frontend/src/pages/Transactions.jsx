@@ -9,28 +9,39 @@ import api from '../services/api';
 function Transactions() {
   const navigate = useNavigate();
   const [user] = useState(() => {
-    const storedUser = JSON.parse(localStorage.getItem('sirkome_user') || 'null');
+    const storedUser = JSON.parse(sessionStorage.getItem('sirkome_user') || 'null');
     return storedUser;
   });
   const [transactions, setTransactions] = useState([]);
+  const [page, setPage] = useState(1);
+  const [pageMeta, setPageMeta] = useState({ page: 1, per_page: 10, total: 0, pages: 1 });
 
   useEffect(() => {
-    const token = localStorage.getItem('sirkome_token');
+    const token = sessionStorage.getItem('sirkome_token');
     if (!token) {
       navigate('/login');
       return;
     }
 
-    api.get('/transactions', { headers: { Authorization: `Bearer ${token}` } })
+    api.get('/transactions', {
+      params: { page, per_page: 10 },
+      headers: { Authorization: `Bearer ${token}` },
+    })
       .then((response) => {
-        setTransactions(response.data);
+        setTransactions(response.data?.items || []);
+        setPageMeta({
+          page: response.data?.page || page,
+          per_page: response.data?.per_page || 10,
+          total: response.data?.total || 0,
+          pages: response.data?.pages || 1,
+        });
       })
       .catch(() => {
-        localStorage.removeItem('sirkome_token');
-        localStorage.removeItem('sirkome_user');
+        sessionStorage.removeItem('sirkome_token');
+        sessionStorage.removeItem('sirkome_user');
         navigate('/login');
       });
-  }, [navigate]);
+  }, [navigate, page]);
 
   if (!user) {
     return null;
@@ -83,6 +94,16 @@ function Transactions() {
                 ))}
               </div>
             )}
+
+            <div className="mt-5 flex items-center justify-between border-t border-slate-200 pt-4 text-sm text-slate-600">
+              <button type="button" onClick={() => setPage((current) => Math.max(1, current - 1))} disabled={page <= 1} className="font-medium text-cyan-700 disabled:cursor-not-allowed disabled:opacity-40">
+                Previous
+              </button>
+              <span>Page {pageMeta.page} of {pageMeta.pages} · {pageMeta.total} total</span>
+              <button type="button" onClick={() => setPage((current) => Math.min(pageMeta.pages, current + 1))} disabled={page >= pageMeta.pages} className="font-medium text-cyan-700 disabled:cursor-not-allowed disabled:opacity-40">
+                Next
+              </button>
+            </div>
           </section>
         </main>
       </div>

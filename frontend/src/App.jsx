@@ -6,6 +6,7 @@ import Login from './pages/Login';
 import Register from './pages/Register';
 import Transfer from './pages/Transfer';
 import Transactions from './pages/Transactions';
+import VerifyEmail from './pages/VerifyEmail';
 
 function App() {
   return (
@@ -14,6 +15,7 @@ function App() {
         <Route path="/" element={<Dashboard />} />
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
+        <Route path="/verify-email" element={<VerifyEmail />} />
         <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/accounts" element={<Accounts />} />
         <Route path="/transfer" element={<Transfer />} />

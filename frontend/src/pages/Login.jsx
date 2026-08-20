@@ -7,6 +7,10 @@ import api from '../services/api';
 
 const validateEmailAddress = (value) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
 
+function ValidationMessage({ message }) {
+  return message ? <p className="mt-1 text-xs text-rose-600">{message}</p> : null;
+}
+
 function Login() {
   const navigate = useNavigate();
   const [email, setEmail] = useState('komeisioro+admin@gmail.com');
@@ -16,7 +20,7 @@ function Login() {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    if (localStorage.getItem('sirkome_token')) {
+    if (sessionStorage.getItem('sirkome_token')) {
       navigate('/dashboard');
     }
   }, [navigate]);
@@ -41,8 +45,8 @@ function Login() {
     try {
       const response = await api.post('/auth/login', { email, password });
       const { token, user } = response.data;
-      localStorage.setItem('sirkome_token', token);
-      localStorage.setItem('sirkome_user', JSON.stringify(user));
+      sessionStorage.setItem('sirkome_token', token);
+      sessionStorage.setItem('sirkome_user', JSON.stringify(user));
       navigate('/dashboard');
     } catch (err) {
       const detail = err.response?.data?.detail;
@@ -97,6 +101,7 @@ function Login() {
               value={email}
               onChange={(event) => setEmail(event.target.value)}
             />
+            <ValidationMessage message={email && !validateEmailAddress(email) ? 'Invalid email. Include @ and a domain such as .com.' : ''} />
 
             <label className="mt-4 block text-sm font-medium text-slate-700" htmlFor="password">
               Password <span className="text-rose-500">*</span>
@@ -119,6 +124,7 @@ function Login() {
                 {showPassword ? <VisibilityOff fontSize="small" /> : <Visibility fontSize="small" />}
               </button>
             </div>
+            <ValidationMessage message={password && password.length < 8 ? 'Password must be at least 8 characters.' : ''} />
 
             {error ? <p className="mt-4 text-sm text-rose-600">{error}</p> : null}
 

@@ -15,9 +15,9 @@ const quickActions = [
 
 function Dashboard() {
   const navigate = useNavigate();
-  const [user] = useState(() => {
+  const [user, setUser] = useState(() => {
     try {
-      return JSON.parse(localStorage.getItem('sirkome_user') || 'null');
+      return JSON.parse(sessionStorage.getItem('sirkome_user') || 'null');
     } catch {
       return null;
     }
@@ -25,69 +25,102 @@ function Dashboard() {
   const [transactions, setTransactions] = useState([]);
   const [adminUserId, setAdminUserId] = useState('');
   const [adminMessage, setAdminMessage] = useState('');
-  const [adminDeleting, setAdminDeleting] = useState(false);
+  const [adminActionBusy, setAdminActionBusy] = useState(false);
+  const [adminPage, setAdminPage] = useState(1);
   const [users, setUsers] = useState([]);
+  const [pageMeta, setPageMeta] = useState({ page: 1, per_page: 10, total: 0, pages: 1 });
+  const [freezeReason, setFreezeReason] = useState('');
 
   useEffect(() => {
-    const token = localStorage.getItem('sirkome_token');
+    const token = sessionStorage.getItem('sirkome_token');
     if (!token || !user) {
-      localStorage.removeItem('sirkome_token');
-      localStorage.removeItem('sirkome_user');
+      sessionStorage.removeItem('sirkome_token');
+      sessionStorage.removeItem('sirkome_user');
       navigate('/login');
       return;
     }
 
     Promise.all([
       api.get('/accounts', { headers: { Authorization: `Bearer ${token}` } }),
-      api.get('/transactions', { headers: { Authorization: `Bearer ${token}` } }),
-      user.is_admin ? api.get('/admin/users', { headers: { Authorization: `Bearer ${token}` } }) : Promise.resolve({ data: [] }),
+      api.get('/transactions', {
+        params: { page: 1, per_page: 5 },
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+      user.is_admin ? api.get('/admin/users', {
+        params: { page: adminPage, per_page: 10 },
+        headers: { Authorization: `Bearer ${token}` },
+      }) : Promise.resolve({ data: { items: [] } }),
     ])
-      .then(([, transactionsResponse, usersResponse]) => {
-        setTransactions(transactionsResponse.data);
+      .then(([accountsResponse, transactionsResponse, usersResponse]) => {
+        setTransactions(transactionsResponse.data?.items || []);
         if (user.is_admin) {
-          setUsers(usersResponse.data);
+          const nextUsers = Array.isArray(usersResponse.data?.items) ? usersResponse.data.items : [];
+          setUsers(nextUsers);
+          setPageMeta({
+            page: usersResponse.data?.page || 1,
+            per_page: usersResponse.data?.per_page || 10,
+            total: usersResponse.data?.total || 0,
+            pages: usersResponse.data?.pages || 1,
+          });
+        }
+        if (accountsResponse.data?.[0]?.account_number) {
+          setUser((current) => current ? { ...current, balance: accountsResponse.data[0].balance } : current);
         }
       })
       .catch(() => {
-        localStorage.removeItem('sirkome_token');
-        localStorage.removeItem('sirkome_user');
+        sessionStorage.removeItem('sirkome_token');
+        sessionStorage.removeItem('sirkome_user');
         navigate('/login');
       });
-  }, [navigate, user]);
+  }, [navigate, user, adminPage]);
 
-  const handleAdminDelete = async () => {
+  const selectedUser = users.find((entry) => entry.user_id === adminUserId || String(entry.id) === adminUserId || entry.account_number === adminUserId) || null;
+
+  const handleUserFreeze = async (freezeUser, reasonOverride) => {
     if (!adminUserId.trim()) {
-      setAdminMessage('Enter a user identifier to remove.');
+      setAdminMessage('Select a customer from the list first.');
       return;
     }
 
-    const selectedUser = users.find((entry) => entry.user_id === adminUserId.trim() || String(entry.id) === adminUserId.trim());
     if (!selectedUser) {
       setAdminMessage('That user is not available in the admin list.');
       return;
     }
 
-    const confirmed = window.confirm(`Remove ${selectedUser.name} (${selectedUser.email}) from the database?`);
-    if (!confirmed) {
+    const nextReason = reasonOverride ?? freezeReason.trim();
+    if (freezeUser && !nextReason) {
+      setAdminMessage('Add a reason before freezing this account.');
       return;
     }
 
-    setAdminDeleting(true);
+    setAdminActionBusy(true);
     setAdminMessage('');
 
     try {
-      const token = localStorage.getItem('sirkome_token');
-      const response = await api.delete(`/admin/users/${encodeURIComponent(adminUserId.trim())}`, {
+      const token = sessionStorage.getItem('sirkome_token');
+      const response = await api.patch(`/admin/users/${encodeURIComponent(selectedUser.user_id || selectedUser.account_number || String(selectedUser.id))}/freeze`, {
+        is_frozen: freezeUser,
+        reason: freezeUser ? nextReason : '',
+      }, {
         headers: { Authorization: `Bearer ${token}` },
       });
 
-      setAdminMessage(response.data?.message || 'User removed successfully.');
-      setUsers((current) => current.filter((entry) => entry.user_id !== adminUserId.trim() && String(entry.id) !== adminUserId.trim()));
+      const updatedUser = response.data?.user;
+      setAdminMessage(response.data?.message || 'Customer status updated.');
+      setUsers((current) => current.map((entry) => (
+        entry.user_id === selectedUser.user_id || String(entry.id) === String(selectedUser.id)
+          ? { ...entry, is_frozen: Boolean(updatedUser?.is_frozen ?? freezeUser), freeze_reason: updatedUser?.freeze_reason || (freezeUser ? nextReason : null) }
+          : entry
+      )));
+      if (updatedUser) {
+        setUser((current) => current ? { ...current, is_frozen: Boolean(updatedUser.is_frozen), freeze_reason: updatedUser.freeze_reason || null } : current);
+      }
+      setFreezeReason('');
       setAdminUserId('');
     } catch (error) {
-      setAdminMessage(error.response?.data?.detail || 'Unable to remove the selected user.');
+      setAdminMessage(error.response?.data?.detail || 'Unable to update the selected user status.');
     } finally {
-      setAdminDeleting(false);
+      setAdminActionBusy(false);
     }
   };
 
@@ -102,6 +135,15 @@ function Dashboard() {
 
         <main className="flex-1 space-y-4">
           <Navbar user={user} />
+
+          {user.is_frozen ? (
+            <div className="rounded-[24px] border border-amber-200 bg-amber-50 px-5 py-4 text-amber-900 shadow-sm">
+              <p className="text-sm font-semibold uppercase tracking-wide">Account frozen</p>
+              <p className="mt-1 text-sm">
+                Your account has been frozen for: {user.freeze_reason || 'No reason provided'}. Please contact support for assistance.
+              </p>
+            </div>
+          ) : null}
 
           <div className="grid gap-4 2xl:grid-cols-[1.25fr_0.8fr]">
             <div className="space-y-4">
@@ -179,57 +221,98 @@ function Dashboard() {
               </section>
             </div>
 
-            <div className="space-y-4">              {user?.is_admin ? (
+            <div className="space-y-4">
+              {user?.is_admin ? (
                 <section className="rounded-[28px] border border-rose-200/70 bg-white/80 p-5 shadow-lg backdrop-blur">
                   <div className="mb-4 flex items-center justify-between">
                     <div>
                       <p className="text-sm text-slate-500">Admin tools</p>
-                      <h2 className="text-lg font-semibold text-slate-900">Remove a user safely</h2>
+                      <h2 className="text-lg font-semibold text-slate-900">Customer management</h2>
                     </div>
                     <div className="rounded-2xl bg-rose-50 p-2 text-rose-600">
                       <Delete fontSize="small" />
                     </div>
                   </div>
                   <div className="space-y-3">
-                    <label className="block text-sm font-medium text-slate-700" htmlFor="admin-user-id">
-                      Available users
-                    </label>
-                    <div className="max-h-44 space-y-2 overflow-auto rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                    <div className="max-h-52 space-y-2 overflow-auto rounded-2xl border border-slate-200 bg-slate-50 p-3">
                       {users.length === 0 ? (
-                        <p className="text-sm text-slate-500">No users loaded.</p>
+                        <p className="text-sm text-slate-500">No customer records loaded.</p>
                       ) : (
                         users.map((entry) => (
                           <button
                             key={entry.user_id || entry.id}
                             type="button"
-                            onClick={() => setAdminUserId(entry.user_id || String(entry.id))}
-                            className="block w-full rounded-xl bg-white px-3 py-2 text-left text-sm text-slate-700 shadow-sm transition hover:bg-slate-100"
+                            onClick={() => setAdminUserId(entry.user_id || entry.account_number || String(entry.id))}
+                            className={`block w-full rounded-xl px-3 py-2 text-left text-sm shadow-sm transition ${
+                              adminUserId === (entry.user_id || entry.account_number || String(entry.id))
+                                ? 'bg-cyan-50 text-cyan-800 ring-1 ring-cyan-200'
+                                : 'bg-white text-slate-700 hover:bg-slate-100'
+                            }`}
                           >
                             <span className="font-semibold">{entry.name}</span>
                             <span className="block text-slate-500">{entry.email}</span>
-                            <span className="block text-slate-400">{entry.user_id}</span>
+                            <span className="block text-slate-400">{entry.account_number}</span>
+                            <span className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-medium ${entry.is_frozen ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                              {entry.is_frozen ? 'Frozen' : 'Active'}
+                            </span>
                           </button>
                         ))
                       )}
                     </div>
+
                     <label className="block text-sm font-medium text-slate-700" htmlFor="admin-user-id">
-                      User ID
+                      Selected customer
                     </label>
                     <input
                       id="admin-user-id"
                       value={adminUserId}
                       onChange={(event) => setAdminUserId(event.target.value)}
-                      placeholder="Enter USR-... or numeric user id"
+                      placeholder="Select a customer"
                       className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
                     />
-                    <button
-                      type="button"
-                      onClick={handleAdminDelete}
-                      disabled={adminDeleting}
-                      className="w-full rounded-2xl bg-rose-600 px-4 py-3 text-sm font-semibold text-white shadow-lg transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-70"
-                    >
-                      {adminDeleting ? 'Removing user...' : 'Remove user'}
-                    </button>
+
+                    {selectedUser ? (
+                      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+                        <p><span className="font-medium">Name:</span> {selectedUser.name}</p>
+                        <p><span className="font-medium">Email:</span> {selectedUser.email}</p>
+                        <p><span className="font-medium">Account:</span> {selectedUser.account_number}</p>
+                        <p><span className="font-medium">Status:</span> {selectedUser.is_frozen ? 'Frozen' : 'Active'}</p>
+                      </div>
+                    ) : null}
+
+                    <textarea
+                      value={freezeReason}
+                      onChange={(event) => setFreezeReason(event.target.value)}
+                      rows={3}
+                      placeholder="Enter a freeze reason for this customer"
+                      className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm"
+                    />
+
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      <button
+                        type="button"
+                        onClick={() => handleUserFreeze(true, freezeReason)}
+                        disabled={adminActionBusy}
+                        className="rounded-2xl bg-amber-500 px-4 py-3 text-sm font-semibold text-white shadow-lg transition hover:bg-amber-600 disabled:cursor-not-allowed disabled:opacity-70"
+                      >
+                        {adminActionBusy ? 'Updating...' : 'Freeze account'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleUserFreeze(false, '')}
+                        disabled={adminActionBusy}
+                        className="rounded-2xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white shadow-lg transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-70"
+                      >
+                        {adminActionBusy ? 'Updating...' : 'Unfreeze'}
+                      </button>
+                    </div>
+
+                    <div className="flex items-center justify-between text-sm text-slate-600">
+                      <button type="button" onClick={() => setAdminPage((current) => Math.max(1, current - 1))} disabled={adminPage <= 1} className="disabled:opacity-50">Previous</button>
+                      <span>Page {pageMeta.page} / {pageMeta.pages}</span>
+                      <button type="button" onClick={() => setAdminPage((current) => Math.min(pageMeta.pages, current + 1))} disabled={adminPage >= pageMeta.pages} className="disabled:opacity-50">Next</button>
+                    </div>
+
                     {adminMessage ? <p className="text-sm text-slate-700">{adminMessage}</p> : null}
                   </div>
                 </section>

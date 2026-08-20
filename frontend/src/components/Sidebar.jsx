@@ -13,8 +13,8 @@ function Sidebar() {
   const navigate = useNavigate();
 
   const handleLogout = () => {
-    localStorage.removeItem('sirkome_token');
-    localStorage.removeItem('sirkome_user');
+    sessionStorage.removeItem('sirkome_token');
+    sessionStorage.removeItem('sirkome_user');
     navigate('/login');
   };
 
