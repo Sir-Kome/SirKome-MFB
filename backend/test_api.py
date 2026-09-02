@@ -56,6 +56,14 @@ def test_admin_login_returns_admin_flag_for_dashboard():
     assert data["user"]["is_admin"] is True
 
 
+def test_admin_seed_account_has_funding_for_transfers():
+    admin = main.get_user_by_email("admin@sirkome.com")
+    assert admin is not None
+    wallet = main.get_wallet_by_account(admin["account_number"])
+    assert wallet is not None
+    assert wallet["wallet_balance"] == 50000000.0
+
+
 def test_login_failure():
     response = client.post(
         "/auth/login",
@@ -204,6 +212,34 @@ def test_accounts_requires_authentication():
     response = client.get("/accounts")
 
     assert response.status_code == 401
+
+
+def test_saved_accounts_are_user_specific_and_require_authentication():
+    login_response = client.post(
+        "/auth/login",
+        json={"email": "komeisioro+demo@gmail.com", "password": "demo1234"},
+    )
+    token = login_response.json()["token"]
+
+    response = client.get("/saved-accounts", headers={"Authorization": f"Bearer {token}"})
+    assert response.status_code == 200
+    assert isinstance(response.json(), list)
+
+    response = client.post(
+        "/saved-accounts",
+        json={"account_number": "SK-ADMIN", "account_name": "Admin User"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 200
+    assert response.json()["account_number"] == "SK-ADMIN"
+
+    response = client.get("/saved-accounts", headers={"Authorization": f"Bearer {token}"})
+    assert response.status_code == 200
+    data = response.json()
+    assert any(item["account_number"] == "SK-ADMIN" for item in data)
+
+    guest_response = client.get("/saved-accounts")
+    assert guest_response.status_code == 401
 
 
 def test_transactions_support_pagination_metadata():

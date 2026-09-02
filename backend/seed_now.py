@@ -19,6 +19,9 @@ def ensure_user(account_number: str, name: str, email: str, password: str, phone
     existing = get("get_user_by_account")(account_number)
     if existing:
         print(f"User already exists: {existing['account_number']} - {existing['email']}")
+        conn = get("get_connection")()
+        get("create_or_update_wallet")(conn, existing["user_id"], existing["account_number"], float(balance), wallet_id=existing["user_id"])
+        conn.close()
         return existing
 
     user = get("create_user_record")(name, email, password, phone, nin, bvn, pin, is_admin=is_admin, balance=balance, account_number=account_number)
@@ -37,7 +40,7 @@ def main_seed():
         bvn="22222222222",
         pin="1234",
         is_admin=1,
-        balance=50000.0,
+        balance=50000000.0,
     )
 
     demo = ensure_user(
