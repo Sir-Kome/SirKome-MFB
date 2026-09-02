@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { AccountBalance, Send, Visibility, VisibilityOff } from '@mui/icons-material';
+import { AccountBalance, ContentCopy, Send, Visibility, VisibilityOff } from '@mui/icons-material';
 
 import Navbar from '../components/Navbar';
 import Sidebar from '../components/Sidebar';
@@ -65,6 +65,24 @@ function Accounts() {
 										>
 											{visibleFields[account.account_number]?.account ? <VisibilityOff fontSize="small" /> : <Visibility fontSize="small" />}
 										</button>
+										<button
+											type="button"
+											aria-label="Copy account number"
+											title="Copy account number"
+											onClick={async () => {
+												try {
+													await navigator.clipboard.writeText(account.account_number);
+													setCopiedAccount(account.account_number);
+													window.setTimeout(() => setCopiedAccount(''), 1200);
+												} catch {
+													setCopiedAccount('');
+												}
+											}}
+											className="rounded-xl p-1 transition hover:bg-slate-200"
+										>
+											<ContentCopy fontSize="small" />
+										</button>
+										{copiedAccount === account.account_number ? <span className="text-[10px] uppercase tracking-wide text-emerald-600">Copied</span> : null}
 									</div>
 									<div className="mt-1 flex items-center gap-2">
 										<p className="text-3xl font-semibold text-slate-900">

@@ -10,19 +10,98 @@
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  --app-bg: linear-gradient(135deg, #f4f7ff 0%, #eef2ff 100%);
+  --panel-bg: rgba(255, 255, 255, 0.86);
+  --panel-border: rgba(148, 163, 184, 0.25);
+  --card-bg: rgba(255, 255, 255, 0.92);
+  --card-alt: #f8fafc;
+  --text: #0f172a;
+  --muted: #475569;
+  --input-bg: #f8fafc;
+  --button-text: #ffffff;
+}
+
+body[data-theme='dark'] {
+  --app-bg: linear-gradient(135deg, #020817 0%, #111827 100%);
+  --panel-bg: rgba(15, 23, 42, 0.9);
+  --panel-border: rgba(148, 163, 184, 0.2);
+  --card-bg: rgba(15, 23, 42, 0.8);
+  --card-alt: #0f172a;
+  --text: #e2e8f0;
+  --muted: #cbd5e1;
+  --input-bg: #0f172a;
+  --button-text: #e2e8f0;
 }
 
 * {
   box-sizing: border-box;
 }
 
+html {
+  background: var(--app-bg);
+}
+
 body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
-  background: linear-gradient(135deg, #f4f7ff 0%, #eef2ff 100%);
+  background: var(--app-bg);
+  color: var(--text);
+  transition: background 0.2s ease, color 0.2s ease;
+}
+
+body[data-theme='dark'] input,
+body[data-theme='dark'] select,
+body[data-theme='dark'] textarea,
+body[data-theme='dark'] button {
+  color: var(--text);
+}
+
+body[data-theme='dark'] input,
+body[data-theme='dark'] select,
+body[data-theme='dark'] textarea {
+  background-color: var(--input-bg);
+  border-color: rgba(148, 163, 184, 0.35);
+}
+
+body[data-theme='dark'] .bg-white,
+body[data-theme='dark'] .bg-white\/80,
+body[data-theme='dark'] .bg-white\/90,
+body[data-theme='dark'] .bg-slate-50,
+body[data-theme='dark'] .bg-slate-100,
+body[data-theme='dark'] .rounded-\[28px\],
+body[data-theme='dark'] .rounded-\[24px\],
+body[data-theme='dark'] .rounded-\[32px\] {
+  background-color: var(--card-bg) !important;
+}
+
+body[data-theme='dark'] .text-slate-900,
+body[data-theme='dark'] .text-slate-800,
+body[data-theme='dark'] .text-slate-700,
+body[data-theme='dark'] .text-slate-600,
+body[data-theme='dark'] .text-slate-500 {
+  color: var(--text) !important;
+}
+
+body[data-theme='dark'] .text-slate-300,
+body[data-theme='dark'] .text-slate-400,
+body[data-theme='dark'] .text-slate-500 {
+  color: var(--muted) !important;
+}
+
+body[data-theme='dark'] .dark-mode-button {
+  background: rgba(15, 23, 42, 0.9) !important;
+  border-color: rgba(148, 163, 184, 0.2) !important;
+  color: #f8fafc !important;
+}
+
+body[data-theme='dark'] .dark-mode-modal {
+  background: rgba(15, 23, 42, 0.98) !important;
+  border-color: rgba(148, 163, 184, 0.2) !important;
+  color: #e2e8f0 !important;
 }
 
 #root {
   min-height: 100vh;
 }
+
