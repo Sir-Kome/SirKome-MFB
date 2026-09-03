@@ -14,6 +14,9 @@ A full-stack **Microfinance Banking System (MFB)** built with **FastAPI** (Backe
 - Automatic wallet creation
 - NIN validation
 - BVN validation
+- Customer profile editing and tier upgrades
+- Tiered daily transfer limits: Tier 1 (NGN 50,000), Tier 2 (NGN 100,000), Tier 3 (NGN 500,000)
+- Proof-of-address upload with three-month date validation and Google Maps address verification
 
 ---
 
@@ -54,6 +57,10 @@ A full-stack **Microfinance Banking System (MFB)** built with **FastAPI** (Backe
 - Customer management
 - Transaction monitoring
 - Audit logging
+
+## 🗺️ Address Verification
+
+Set `GOOGLE_MAPS_API_KEY` (or `SIRKOME_GOOGLE_MAPS_API_KEY`) in the backend environment before customers submit a Tier 3 upgrade. The key must have the Google Maps Geocoding API enabled.
 
 ---
 

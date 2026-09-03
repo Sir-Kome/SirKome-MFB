@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { AccountBalance, Send, Visibility, VisibilityOff } from '@mui/icons-material';
+import { AccountBalance, ContentCopy, Send, Visibility, VisibilityOff } from '@mui/icons-material';
 
 import Navbar from '../components/Navbar';
 import Sidebar from '../components/Sidebar';
@@ -8,10 +8,11 @@ import api from '../services/api';
 
 function Accounts() {
 	const navigate = useNavigate();
-	const user = JSON.parse(localStorage.getItem('sirkome_user') || 'null');
+	const user = JSON.parse(sessionStorage.getItem('sirkome_user') || 'null');
 	const userAccountNumber = user?.account_number;
 	const [accounts, setAccounts] = useState([]);
 	const [visibleFields, setVisibleFields] = useState({});
+	const [copiedAccount, setCopiedAccount] = useState('');
 
 	const toggleField = (accountNumber, field) => {
 		setVisibleFields((current) => ({
@@ -21,7 +22,7 @@ function Accounts() {
 	};
 
 	useEffect(() => {
-		const token = localStorage.getItem('sirkome_token');
+		const token = sessionStorage.getItem('sirkome_token');
 		if (!token || !userAccountNumber) {
 			navigate('/login');
 			return;
@@ -65,6 +66,24 @@ function Accounts() {
 										>
 											{visibleFields[account.account_number]?.account ? <VisibilityOff fontSize="small" /> : <Visibility fontSize="small" />}
 										</button>
+										<button
+											type="button"
+											aria-label="Copy account number"
+											title="Copy account number"
+											onClick={async () => {
+												try {
+													await navigator.clipboard.writeText(account.account_number);
+													setCopiedAccount(account.account_number);
+													window.setTimeout(() => setCopiedAccount(''), 1200);
+												} catch {
+													setCopiedAccount('');
+												}
+											}}
+											className="rounded-xl p-1 transition hover:bg-slate-200"
+										>
+											<ContentCopy fontSize="small" />
+										</button>
+										{copiedAccount === account.account_number ? <span className="text-[10px] uppercase tracking-wide text-emerald-600">Copied</span> : null}
 									</div>
 									<div className="mt-1 flex items-center gap-2">
 										<p className="text-3xl font-semibold text-slate-900">

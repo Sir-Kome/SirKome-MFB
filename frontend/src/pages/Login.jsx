@@ -5,30 +5,56 @@ import { useNavigate } from 'react-router-dom';
 
 import api from '../services/api';
 
+const validateEmailAddress = (value) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+
+function ValidationMessage({ message }) {
+  return message ? <p className="mt-1 text-xs text-rose-600">{message}</p> : null;
+}
+
 function Login() {
   const navigate = useNavigate();
-  const [email, setEmail] = useState('komeisioro+admin@gmail.com');
-  const [password, setPassword] = useState('admin1234');
+  const [storyIndex, setStoryIndex] = useState(0);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    if (localStorage.getItem('sirkome_token')) {
+    if (sessionStorage.getItem('sirkome_token')) {
       navigate('/dashboard');
     }
   }, [navigate]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setStoryIndex((current) => (current + 1) % 3);
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   const handleLogin = async (event) => {
     event.preventDefault();
     setLoading(true);
     setError('');
 
+    if (!email.trim() || !validateEmailAddress(email)) {
+      setError('Please enter a valid email address.');
+      setLoading(false);
+      return;
+    }
+
+    if (!password.trim()) {
+      setError('Password is required.');
+      setLoading(false);
+      return;
+    }
+
     try {
       const response = await api.post('/auth/login', { email, password });
       const { token, user } = response.data;
-      localStorage.setItem('sirkome_token', token);
-      localStorage.setItem('sirkome_user', JSON.stringify(user));
+      sessionStorage.setItem('sirkome_token', token);
+      sessionStorage.setItem('sirkome_user', JSON.stringify(user));
       navigate('/dashboard');
     } catch (err) {
       const detail = err.response?.data?.detail;
@@ -42,10 +68,10 @@ function Login() {
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(34,211,238,0.2),_transparent_30%),linear-gradient(135deg,_#f4f7ff_0%,_#eef2ff_100%)] px-4 py-6 text-slate-800 sm:px-6 lg:px-8">
       <div className="mx-auto flex min-h-[calc(100vh-3rem)] max-w-6xl flex-col overflow-hidden rounded-[32px] border border-white/70 bg-white/80 shadow-2xl backdrop-blur lg:flex-row">
-        <div className="flex flex-1 flex-col justify-center bg-gradient-to-br from-slate-950 via-slate-900 to-violet-950 p-8 text-white sm:p-10 lg:p-14">
+        <div className="relative flex min-h-[520px] flex-1 flex-col justify-between overflow-hidden bg-gradient-to-br from-slate-950 via-slate-900 to-violet-950 p-8 text-white sm:p-10 lg:min-h-0 lg:p-14">
           <div className="mb-8 flex items-center gap-3">
             <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-cyan-400 to-violet-500 font-semibold">
-              VB
+              SB
             </div>
             <div>
               <p className="text-sm text-slate-400">Secure banking</p>
@@ -53,18 +79,35 @@ function Login() {
             </div>
           </div>
 
-          <h1 className="text-3xl font-semibold sm:text-4xl">
-            Banking that feels effortless.
-          </h1>
-          <p className="mt-4 max-w-md text-base text-slate-300 sm:text-lg">
-            Track your money, move funds instantly, and stay on top of your goals from one beautiful dashboard.
-          </p>
-
-          <div className="mt-8 rounded-3xl border border-white/10 bg-white/10 p-4 backdrop-blur">
-            <p className="text-sm text-slate-300">Admin access</p>
-            <p className="mt-2 text-lg font-semibold">Email: komeisioro+admin@gmail.com</p>
-            <p className="text-sm text-slate-400">Password: admin1234</p>
+          <div className="relative flex flex-1 items-center py-10">
+            {storyIndex === 0 ? (
+              <div key="banking" className="login-story login-story-enter">
+                <p className="text-sm font-medium uppercase tracking-[0.3em] text-cyan-400">Your money, your momentum</p>
+                <h1 className="mt-3 text-3xl font-semibold sm:text-4xl">Banking that feels effortless.</h1>
+                <p className="mt-4 max-w-md text-base text-slate-300 sm:text-lg">Track your money, move funds instantly, and stay on top of your goals from one beautiful dashboard.</p>
+              </div>
+            ) : null}
+            {storyIndex === 1 ? (
+              <div key="creator" className="login-story login-story-enter">
+                <p className="text-sm font-medium uppercase tracking-[0.3em] text-cyan-400">Built with intention</p>
+                <h1 className="mt-3 text-3xl font-semibold sm:text-4xl">Meet the creator.</h1>
+                <p className="mt-4 max-w-md text-base leading-7 text-slate-300 sm:text-lg">I’m Kome Isioro, the creator behind SirKome Bank. I designed this experience to make everyday banking feel clear, confident, and human.</p>
+              </div>
+            ) : null}
+            {storyIndex === 2 ? (
+              <div key="portrait" className="login-story login-story-enter flex w-full items-center gap-5">
+                <img src="/creator.jpeg" alt="Kome Isioro, creator of SirKome Bank" className="h-32 w-24 shrink-0 rounded-2xl object-cover object-top shadow-2xl ring-1 ring-white/20 sm:h-44 sm:w-32" />
+                <div><p className="text-sm font-medium uppercase tracking-[0.3em] text-cyan-400">Creator profile</p><h1 className="mt-3 text-2xl font-semibold sm:text-3xl">Hi, I’m Kome.</h1><p className="mt-3 text-sm leading-6 text-slate-300 sm:text-base">Thanks for being here. Welcome to a bank built for thoughtful progress.</p></div>
+              </div>
+            ) : null}
           </div>
+
+          <div className="flex items-center gap-2" aria-label="Login introduction slides">
+            {[0, 1, 2].map((index) => (
+              <button key={index} type="button" aria-label={`Show introduction slide ${index + 1}`} onClick={() => setStoryIndex(index)} className={`h-1.5 rounded-full transition-all ${storyIndex === index ? 'w-10 bg-cyan-400' : 'w-5 bg-white/30 hover:bg-white/60'}`} />
+            ))}
+          </div>
+
         </div>
 
         <div className="flex flex-1 items-center justify-center p-6 sm:p-8 lg:p-10">
@@ -73,7 +116,7 @@ function Login() {
             <h2 className="mt-2 text-2xl font-semibold text-slate-900">Sign in to your account</h2>
 
             <label className="mt-6 block text-sm font-medium text-slate-700" htmlFor="email">
-              Email
+              Email <span className="text-rose-500">*</span>
             </label>
             <input
               id="email"
@@ -83,9 +126,10 @@ function Login() {
               value={email}
               onChange={(event) => setEmail(event.target.value)}
             />
+            <ValidationMessage message={email && !validateEmailAddress(email) ? 'Invalid email. Include @ and a domain such as .com.' : ''} />
 
             <label className="mt-4 block text-sm font-medium text-slate-700" htmlFor="password">
-              Password
+              Password <span className="text-rose-500">*</span>
             </label>
             <div className="relative mt-2">
               <input
@@ -105,6 +149,7 @@ function Login() {
                 {showPassword ? <VisibilityOff fontSize="small" /> : <Visibility fontSize="small" />}
               </button>
             </div>
+            <ValidationMessage message={password && password.length < 8 ? 'Password must be at least 8 characters.' : ''} />
 
             {error ? <p className="mt-4 text-sm text-rose-600">{error}</p> : null}
 
