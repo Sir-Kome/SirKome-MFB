@@ -1,22 +1,10 @@
-import { ContentCopy, CreditCard, Visibility, VisibilityOff } from '@mui/icons-material';
+import { CreditCard, Visibility, VisibilityOff } from '@mui/icons-material';
 import { useState } from 'react';
 
 function BalanceCard({ balance, accountNumber, userName, onSend }) {
   const [showAccountNumber, setShowAccountNumber] = useState(false);
   const [showBalance, setShowBalance] = useState(false);
-  const [copied, setCopied] = useState(false);
   const maskedAccountNumber = accountNumber ? `•••• ${accountNumber.slice(-4)}` : '••••';
-
-  const handleCopyAccountNumber = async () => {
-    if (!accountNumber) return;
-    try {
-      await navigator.clipboard.writeText(accountNumber);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1200);
-    } catch {
-      setCopied(false);
-    }
-  };
 
   return (
     <section className="rounded-[32px] bg-gradient-to-br from-slate-950 via-slate-900 to-violet-950 p-6 text-white shadow-2xl">

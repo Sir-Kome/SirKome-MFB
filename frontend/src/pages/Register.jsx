@@ -48,7 +48,7 @@ function Register() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [sendingCode, setSendingCode] = useState(false);
-  const [emailVerified, setEmailVerified] = useState(Boolean(location.state?.emailVerified));
+  const [emailVerified] = useState(Boolean(location.state?.emailVerified));
   const [fieldErrors, setFieldErrors] = useState({});
 
   const persistDraft = (nextForm) => sessionStorage.setItem('sirkome_registration_draft', JSON.stringify(nextForm));

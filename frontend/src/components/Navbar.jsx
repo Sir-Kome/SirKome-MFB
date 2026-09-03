@@ -2,7 +2,7 @@ import { Close, DarkMode, LightMode, Notifications as NotificationsIcon } from '
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
-import { useTheme } from '../App';
+import { useTheme } from '../ThemeContext';
 import api from '../services/api';
 
 function Navbar({ user }) {

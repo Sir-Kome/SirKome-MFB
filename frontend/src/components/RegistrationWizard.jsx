@@ -115,7 +115,6 @@ function RegistrationWizard({ initialDraft, onSubmit, onCancel, onVerifiedEmail,
   };
 
   const currentStepId = stepNames[step];
-  const isCurrentStepDone = currentStepId === 'verification' ? true : validateCurrentStep();
 
   const goNext = () => {
     if (!validateCurrentStep()) return;

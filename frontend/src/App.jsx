@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 
 import Accounts from './pages/Accounts';
@@ -12,12 +12,7 @@ import Register from './pages/Register';
 import Transfer from './pages/Transfer';
 import Transactions from './pages/Transactions';
 import VerifyEmail from './pages/VerifyEmail';
-
-const ThemeContext = createContext({ theme: 'light', toggleTheme: () => {} });
-
-export function useTheme() {
-  return useContext(ThemeContext);
-}
+import { ThemeContext } from './ThemeContext';
 
 function App() {
   const [theme, setTheme] = useState(() => {

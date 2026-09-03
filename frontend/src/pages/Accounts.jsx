@@ -12,6 +12,7 @@ function Accounts() {
 	const userAccountNumber = user?.account_number;
 	const [accounts, setAccounts] = useState([]);
 	const [visibleFields, setVisibleFields] = useState({});
+	const [copiedAccount, setCopiedAccount] = useState('');
 
 	const toggleField = (accountNumber, field) => {
 		setVisibleFields((current) => ({
