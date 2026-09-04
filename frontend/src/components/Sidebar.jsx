@@ -1,7 +1,8 @@
 import { AccountBalance, AdminPanelSettings, History, Home, Logout, People, Send } from '@mui/icons-material';
 import { useLocation, useNavigate } from 'react-router-dom';
 
-import MobileBottomNav, { adminMobileItems, customerMobileItems } from './MobileBottomNav';
+import MobileBottomNav from './MobileBottomNav';
+import { adminMobileItems, customerMobileItems } from './mobileNavItems';
 
 const customerMenuItems = [
   { label: 'Dashboard', icon: <Home fontSize="small" />, path: '/dashboard' },
