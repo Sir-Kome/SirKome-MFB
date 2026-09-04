@@ -120,7 +120,7 @@ function Login() {
             <h2 className="mt-2 text-2xl font-semibold text-slate-900">Sign in to your account</h2>
 
             <label className="mt-6 block text-sm font-medium text-slate-700" htmlFor="email">
-              Email <span className="text-rose-500">*</span>
+              Enter Email <span className="text-rose-500">*</span>
             </label>
             <input
               id="email"
@@ -134,7 +134,7 @@ function Login() {
             <ValidationMessage message={email && !validateEmailAddress(email) ? 'Invalid email. Include @ and a domain such as .com.' : ''} />
 
             <label className="mt-4 block text-sm font-medium text-slate-700" htmlFor="password">
-              Password <span className="text-rose-500">*</span>
+              Enter Password <span className="text-rose-500">*</span>
             </label>
             <div className="relative mt-2">
               <input
