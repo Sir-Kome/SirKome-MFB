@@ -1,15 +1,8 @@
-import { createContext, useContext, useState } from 'react';
+import { useState } from 'react';
 
-const RegistrationContext = createContext({
-  secrets: {},
-  setSecrets: () => {},
-});
+import registrationContextValue from './registrationContextValue';
 
 export function RegistrationProvider({ children }) {
   const [secrets, setSecrets] = useState({});
-  return <RegistrationContext.Provider value={{ secrets, setSecrets }}>{children}</RegistrationContext.Provider>;
-}
-
-export function useRegistration() {
-  return useContext(RegistrationContext);
+  return <registrationContextValue.Provider value={{ secrets, setSecrets }}>{children}</registrationContextValue.Provider>;
 }

@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 
-import { useRegistration } from '../RegistrationContext';
+import useRegistration from '../useRegistration';
 import api from '../services/api';
 import { registerUser } from '../services/registration';
 
