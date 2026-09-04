@@ -8,8 +8,16 @@ import { registerUser } from '../services/registration';
 const REGISTRATION_LOCK_KEY = 'sirkome_registration_submission';
 const REGISTRATION_LOCK_TTL = 5 * 60 * 1000;
 
+const readDraft = () => {
+  try {
+    return JSON.parse(sessionStorage.getItem('sirkome_registration_draft') || 'null');
+  } catch {
+    return null;
+  }
+};
+
 const getSavedDraftEmail = () => {
-  const draft = JSON.parse(sessionStorage.getItem('sirkome_registration_draft') || 'null');
+  const draft = readDraft();
   return draft?.email || '';
 };
 
@@ -43,14 +51,19 @@ function VerifyEmail() {
     try {
       await api.post('/auth/verify-email', { email, code });
 
-      const storedDraft = JSON.parse(sessionStorage.getItem('sirkome_registration_draft') || 'null');
+      const storedDraft = readDraft();
       const draft = storedDraft ? { ...storedDraft, ...secrets } : null;
       if (!draft) {
         setError('Registration details were not found. Please return to registration and try again.');
         return;
       }
 
-      const existingLock = JSON.parse(sessionStorage.getItem(REGISTRATION_LOCK_KEY) || 'null');
+      let existingLock = null;
+      try {
+        existingLock = JSON.parse(sessionStorage.getItem(REGISTRATION_LOCK_KEY) || 'null');
+      } catch {
+        sessionStorage.removeItem(REGISTRATION_LOCK_KEY);
+      }
       if (existingLock?.email === email && Date.now() - existingLock.startedAt < REGISTRATION_LOCK_TTL) {
         setError('Account creation is already in progress. Please wait a moment.');
         return;

@@ -71,7 +71,12 @@ function Register() {
   const location = useLocation();
   const { secrets, setSecrets } = useRegistration();
   const [form, setForm] = useState(() => {
-    const saved = JSON.parse(sessionStorage.getItem('sirkome_registration_draft') || 'null');
+    let saved = null;
+    try {
+      saved = JSON.parse(sessionStorage.getItem('sirkome_registration_draft') || 'null');
+    } catch {
+      sessionStorage.removeItem('sirkome_registration_draft');
+    }
     return saved ? { ...emptyForm, ...saved, ...secrets } : { ...emptyForm, ...secrets };
   });
   const [stepIndex, setStepIndex] = useState(0);
