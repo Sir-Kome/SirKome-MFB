@@ -2,6 +2,10 @@ import { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 
 import api from '../services/api';
+import { registerUser } from '../services/registration';
+
+const REGISTRATION_LOCK_KEY = 'sirkome_registration_submission';
+const REGISTRATION_LOCK_TTL = 5 * 60 * 1000;
 
 const getSavedDraftEmail = () => {
   const draft = JSON.parse(sessionStorage.getItem('sirkome_registration_draft') || 'null');
@@ -16,6 +20,7 @@ function VerifyEmail() {
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(false);
+  const [creatingAccount, setCreatingAccount] = useState(false);
   const [resending, setResending] = useState(false);
 
   useEffect(() => {
@@ -35,13 +40,37 @@ function VerifyEmail() {
     setError('');
     try {
       await api.post('/auth/verify-email', { email, code });
-      navigate('/register', {
-        replace: true,
-        state: { emailVerified: true },
-      });
+
+      const draft = JSON.parse(sessionStorage.getItem('sirkome_registration_draft') || 'null');
+      if (!draft) {
+        setError('Registration details were not found. Please return to registration and try again.');
+        return;
+      }
+
+      const existingLock = JSON.parse(sessionStorage.getItem(REGISTRATION_LOCK_KEY) || 'null');
+      if (existingLock?.email === email && Date.now() - existingLock.startedAt < REGISTRATION_LOCK_TTL) {
+        setError('Account creation is already in progress. Please wait a moment.');
+        return;
+      }
+
+      sessionStorage.setItem(REGISTRATION_LOCK_KEY, JSON.stringify({ email, startedAt: Date.now() }));
+      setCreatingAccount(true);
+      setMessage('Email verified. Creating your account...');
+
+      try {
+        await registerUser(draft);
+        sessionStorage.removeItem('sirkome_registration_draft');
+        sessionStorage.removeItem(REGISTRATION_LOCK_KEY);
+        navigate('/login', { replace: true });
+      } catch (registrationError) {
+        sessionStorage.removeItem(REGISTRATION_LOCK_KEY);
+        setMessage('');
+        setError(registrationError.response?.data?.detail || 'Unable to create account. Your registration details were saved.');
+      }
     } catch (err) {
       setError(err.response?.data?.detail || 'The verification code is invalid or expired.');
     } finally {
+      setCreatingAccount(false);
       setLoading(false);
     }
   };
@@ -93,7 +122,7 @@ function VerifyEmail() {
             {error ? <p className="mt-4 text-sm text-rose-600">{error}</p> : null}
 
             <button type="submit" disabled={loading} className="mt-6 w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-violet-500 px-4 py-3 font-semibold text-white shadow-lg disabled:cursor-not-allowed disabled:opacity-70">
-              {loading ? 'Verifying...' : 'Verify email'}
+              {creatingAccount ? 'Creating account...' : loading ? 'Verifying...' : 'Verify email'}
             </button>
             <button type="button" onClick={resendCode} disabled={resending} className="mt-3 w-full rounded-2xl border border-slate-300 px-4 py-3 font-semibold text-slate-700 disabled:cursor-not-allowed disabled:opacity-70">
               {resending ? 'Resending...' : 'Resend code'}
