@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 
 import api from '../services/api';
+import { registerUser } from '../services/registration';
 
 const steps = [
   { id: 'name', label: 'Name' },
@@ -151,13 +152,7 @@ function Register() {
     setLoading(true);
     setError('');
     try {
-      const payload = {
-        ...form,
-        name: `${form.first_name} ${form.last_name}`.trim(),
-      };
-      delete payload.password_confirmation;
-      delete payload.pin_confirmation;
-      const response = await api.post('/auth/register', payload);
+      const response = await registerUser(form);
       if (response?.data) {
         sessionStorage.removeItem('sirkome_registration_draft');
         navigate('/login');
