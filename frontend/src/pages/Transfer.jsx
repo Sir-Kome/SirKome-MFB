@@ -295,6 +295,7 @@ function Transfer() {
               className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
               name="amount"
               type="number"
+              inputMode="decimal"
               step="0.01"
               min="0"
               placeholder="250"
