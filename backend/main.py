@@ -675,8 +675,8 @@ def get_existing_registration_field(email: str, phone: str, nin: str, bvn: str):
         if (
             normalize_email(user["email"]) == normalized_email
             or stored_phone == phone
-            or user["nin"] == nin
-            or user["bvn"] == bvn
+            or (nin is not None and user["nin"] == nin)
+            or (bvn is not None and user["bvn"] == bvn)
         ):
             return user
     return None

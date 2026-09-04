@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 
+import useRegistration from '../useRegistration';
 import api from '../services/api';
 import { registerUser } from '../services/registration';
 
@@ -38,12 +39,40 @@ const validatePassword = (value) => /^(?=.*\d)(?=.*[^A-Za-z0-9\s]).{8,}$/.test(v
 const validateIdentity = (value) => /^\d{11}$/.test(value || '');
 const validatePin = (value) => /^\d{4}$/.test(value || '');
 
+const getFieldError = (name, value, form) => {
+  if (name === 'first_name' || name === 'last_name') {
+    if (!value.trim()) return `${name === 'first_name' ? 'First' : 'Last'} name is required.`;
+    return validateName(value) ? '' : 'Use letters, spaces, apostrophes, or hyphens only.';
+  }
+  if (name === 'middle_name') return value && !validateName(value) ? 'Middle name is invalid.' : '';
+  if (name === 'email') {
+    if (!value.trim()) return 'Email is required.';
+    return validateEmail(value) ? '' : 'Please enter a valid email address.';
+  }
+  if (name === 'phone') {
+    if (!value.trim()) return 'Phone number is required.';
+    return validatePhone(value) ? '' : 'Enter a valid Nigerian mobile number.';
+  }
+  if (name === 'date_of_birth') {
+    if (!value) return 'Date of birth is required.';
+    return value > new Date().toISOString().split('T')[0] ? 'Date of birth cannot be in the future.' : '';
+  }
+  if (name === 'gender') return value ? '' : 'Please select your gender.';
+  if (name === 'nin' || name === 'bvn') return validateIdentity(value) ? '' : `${name.toUpperCase()} must contain exactly 11 digits.`;
+  if (name === 'password') return validatePassword(value) ? '' : 'Use 8+ characters, one number, and one special character.';
+  if (name === 'password_confirmation') return value === form.password ? '' : 'Passwords do not match.';
+  if (name === 'pin') return validatePin(value) ? '' : 'PIN must contain exactly 4 digits.';
+  if (name === 'pin_confirmation') return value === form.pin ? '' : 'PINs do not match.';
+  return '';
+};
+
 function Register() {
   const navigate = useNavigate();
   const location = useLocation();
+  const { secrets, setSecrets } = useRegistration();
   const [form, setForm] = useState(() => {
     const saved = JSON.parse(sessionStorage.getItem('sirkome_registration_draft') || 'null');
-    return saved ? { ...emptyForm, ...saved } : emptyForm;
+    return saved ? { ...emptyForm, ...saved, ...secrets } : { ...emptyForm, ...secrets };
   });
   const [stepIndex, setStepIndex] = useState(0);
   const [error, setError] = useState('');
@@ -52,7 +81,14 @@ function Register() {
   const [emailVerified] = useState(Boolean(location.state?.emailVerified));
   const [fieldErrors, setFieldErrors] = useState({});
 
-  const persistDraft = (nextForm) => sessionStorage.setItem('sirkome_registration_draft', JSON.stringify(nextForm));
+  const persistDraft = (nextForm) => {
+    const draft = { ...nextForm };
+    delete draft.password;
+    delete draft.password_confirmation;
+    delete draft.pin;
+    delete draft.pin_confirmation;
+    sessionStorage.setItem('sirkome_registration_draft', JSON.stringify(draft));
+  };
 
   const updateField = (key, value) => {
     const sanitized = key === 'phone'
@@ -67,8 +103,29 @@ function Register() {
 
     const next = { ...form, [key]: sanitized };
     setForm(next);
+    if (['password', 'password_confirmation', 'pin', 'pin_confirmation'].includes(key)) {
+      setSecrets((current) => ({ ...current, [key]: sanitized }));
+    }
     persistDraft(next);
-    setFieldErrors((current) => ({ ...current, [key]: '' }));
+    const nextErrors = { ...fieldErrors };
+    if (['nin', 'bvn'].includes(key) && key !== next.identity_type) {
+      delete nextErrors[key];
+    } else {
+      const fieldError = getFieldError(key, sanitized, next);
+      if (fieldError) nextErrors[key] = fieldError;
+      else delete nextErrors[key];
+    }
+    if (key === 'password') {
+      const confirmationError = getFieldError('password_confirmation', next.password_confirmation, next);
+      if (confirmationError) nextErrors.password_confirmation = confirmationError;
+      else delete nextErrors.password_confirmation;
+    }
+    if (key === 'pin') {
+      const confirmationError = getFieldError('pin_confirmation', next.pin_confirmation, next);
+      if (confirmationError) nextErrors.pin_confirmation = confirmationError;
+      else delete nextErrors.pin_confirmation;
+    }
+    setFieldErrors(nextErrors);
     setError('');
   };
 
@@ -222,6 +279,7 @@ function Register() {
                 <div>
                   <label className="block text-sm font-medium text-slate-700">Middle name (optional)</label>
                   <input value={form.middle_name} onChange={(event) => updateField('middle_name', event.target.value)} className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" />
+                  {fieldErrors.middle_name ? <p className="mt-1 text-xs text-rose-600">{fieldErrors.middle_name}</p> : null}
                 </div>
               </div>
             )}

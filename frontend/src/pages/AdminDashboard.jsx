@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
-import { AdminPanelSettings, ArrowForward, ContentCopy, Group, History, Security, Send, Visibility, VisibilityOff } from '@mui/icons-material';
+import { AdminPanelSettings, ArrowForward, Group, History, Security, Send, Visibility, VisibilityOff } from '@mui/icons-material';
 
+import AccountNumberCopy from '../components/AccountNumberCopy';
 import Navbar from '../components/Navbar';
 import Sidebar from '../components/Sidebar';
 import api from '../services/api';
@@ -14,7 +15,6 @@ function AdminDashboard() {
   const [transactions, setTransactions] = useState([]);
   const [showAdminBalance, setShowAdminBalance] = useState(false);
   const [showAdminAccountNumber, setShowAdminAccountNumber] = useState(false);
-  const [copiedAccount, setCopiedAccount] = useState('');
 
   useEffect(() => {
     const token = sessionStorage.getItem('sirkome_token');
@@ -93,25 +93,7 @@ function AdminDashboard() {
                   >
                     {showAdminAccountNumber ? <VisibilityOff fontSize="small" /> : <Visibility fontSize="small" />}
                   </button>
-                  <button
-                    type="button"
-                    aria-label="Copy account number"
-                    title="Copy account number"
-                    onClick={async () => {
-                      if (!user.account_number) return;
-                      try {
-                        await navigator.clipboard.writeText(user.account_number);
-                        setCopiedAccount(user.account_number);
-                        window.setTimeout(() => setCopiedAccount(''), 1200);
-                      } catch {
-                        setCopiedAccount('');
-                      }
-                    }}
-                    className="rounded-xl p-1 transition hover:bg-slate-200"
-                  >
-                    <ContentCopy fontSize="small" />
-                  </button>
-                  {copiedAccount === user.account_number ? <span className="text-[10px] uppercase tracking-wide text-emerald-600">Copied</span> : null}
+                  <AccountNumberCopy accountNumber={user.account_number} />
                 </div>
               </div>
               <div className="rounded-2xl bg-emerald-50 px-4 py-3 text-left">
@@ -155,25 +137,7 @@ function AdminDashboard() {
                         <p className="font-medium text-slate-800">{account.name}</p>
                         <div className="mt-1 flex items-center gap-2 text-sm text-slate-500">
                           <span>{account.account_number ? `•••• ${account.account_number.slice(-4)}` : '••••'}</span>
-                          <button
-                            type="button"
-                            aria-label="Copy account number"
-                            title="Copy account number"
-                            onClick={async () => {
-                              if (!account.account_number) return;
-                              try {
-                                await navigator.clipboard.writeText(account.account_number);
-                                setCopiedAccount(account.account_number);
-                                window.setTimeout(() => setCopiedAccount(''), 1200);
-                              } catch {
-                                setCopiedAccount('');
-                              }
-                            }}
-                            className="rounded-xl p-1 transition hover:bg-slate-200"
-                          >
-                            <ContentCopy fontSize="small" />
-                          </button>
-                          {copiedAccount === account.account_number ? <span className="text-[10px] uppercase tracking-wide text-emerald-600">Copied</span> : null}
+                          <AccountNumberCopy accountNumber={account.account_number} />
                         </div>
                       </div>
                       <div className="text-right">
