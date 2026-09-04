@@ -35,8 +35,10 @@ function VerifyEmail() {
     setError('');
     try {
       await api.post('/auth/verify-email', { email, code });
-      sessionStorage.removeItem('sirkome_registration_draft');
-      navigate('/login', { replace: true });
+      navigate('/register', {
+        replace: true,
+        state: { emailVerified: true },
+      });
     } catch (err) {
       setError(err.response?.data?.detail || 'The verification code is invalid or expired.');
     } finally {
