@@ -57,6 +57,10 @@ function VerifyEmail() {
         setError('Registration details were not found. Please return to registration and try again.');
         return;
       }
+      if (String(draft.email || '').trim().toLowerCase() !== String(email || '').trim().toLowerCase()) {
+        setError('The saved registration details do not match this verified email. Please start registration again.');
+        return;
+      }
 
       let existingLock = null;
       try {

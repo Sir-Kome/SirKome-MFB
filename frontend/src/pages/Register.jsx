@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 
 import useRegistration from '../useRegistration';
@@ -70,7 +70,13 @@ function Register() {
   const navigate = useNavigate();
   const location = useLocation();
   const { secrets, setSecrets } = useRegistration();
+  const returningFromVerification = Boolean(location.state?.emailVerified);
   const [form, setForm] = useState(() => {
+    if (!returningFromVerification) {
+      sessionStorage.removeItem('sirkome_registration_draft');
+      return emptyForm;
+    }
+
     let saved = null;
     try {
       saved = JSON.parse(sessionStorage.getItem('sirkome_registration_draft') || 'null');
@@ -83,8 +89,14 @@ function Register() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [sendingCode, setSendingCode] = useState(false);
-  const [emailVerified] = useState(Boolean(location.state?.emailVerified));
+  const [emailVerified] = useState(returningFromVerification);
   const [fieldErrors, setFieldErrors] = useState({});
+
+  useEffect(() => {
+    if (!returningFromVerification) {
+      setSecrets({});
+    }
+  }, [returningFromVerification, setSecrets]);
 
   const persistDraft = (nextForm) => {
     const draft = { ...nextForm };

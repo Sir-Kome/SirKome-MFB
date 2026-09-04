@@ -672,12 +672,18 @@ def get_existing_registration_field(email: str, phone: str, nin: str, bvn: str):
     normalized_email = normalize_email(email)
     for user in users:
         stored_phone = "".join(char for char in (user["phone"] or "") if char.isdigit())
-        if (
-            normalize_email(user["email"]) == normalized_email
-            or stored_phone == phone
-            or (nin is not None and user["nin"] == nin)
-            or (bvn is not None and user["bvn"] == bvn)
-        ):
+        matched_field = None
+        if normalize_email(user["email"]) == normalized_email:
+            matched_field = "email"
+        elif stored_phone == phone:
+            matched_field = "phone"
+        elif nin is not None and user["nin"] == nin:
+            matched_field = "NIN"
+        elif bvn is not None and user["bvn"] == bvn:
+            matched_field = "BVN"
+
+        if matched_field:
+            print(f"Duplicate registration detected: {matched_field}")
             return user
     return None
 
