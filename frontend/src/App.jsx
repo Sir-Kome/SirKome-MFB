@@ -12,6 +12,7 @@ import Register from './pages/Register';
 import Transfer from './pages/Transfer';
 import Transactions from './pages/Transactions';
 import VerifyEmail from './pages/VerifyEmail';
+import { RegistrationProvider } from './RegistrationContext';
 import { ThemeContext } from './ThemeContext';
 
 function App() {
@@ -35,8 +36,9 @@ function App() {
 
   return (
     <ThemeContext.Provider value={value}>
-      <BrowserRouter>
-        <Routes>
+      <RegistrationProvider>
+        <BrowserRouter>
+          <Routes>
           <Route path="/" element={<Dashboard />} />
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
@@ -50,8 +52,9 @@ function App() {
           <Route path="/transfer" element={<Transfer />} />
           <Route path="/transactions" element={<Transactions />} />
           <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </BrowserRouter>
+          </Routes>
+        </BrowserRouter>
+      </RegistrationProvider>
     </ThemeContext.Provider>
   );
 }

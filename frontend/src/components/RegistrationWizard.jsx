@@ -46,7 +46,12 @@ function RegistrationWizard({ initialDraft, onSubmit, onCancel, onVerifiedEmail,
   const stepNames = useMemo(() => steps.map((item) => item.id), []);
 
   const persistDraft = (nextForm) => {
-    sessionStorage.setItem('sirkome_registration_draft', JSON.stringify(nextForm));
+    const draft = { ...nextForm };
+    delete draft.password;
+    delete draft.password_confirmation;
+    delete draft.pin;
+    delete draft.pin_confirmation;
+    sessionStorage.setItem('sirkome_registration_draft', JSON.stringify(draft));
   };
 
   const updateField = (name, value) => {

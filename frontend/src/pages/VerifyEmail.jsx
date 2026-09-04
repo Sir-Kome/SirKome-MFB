@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 
+import { useRegistration } from '../RegistrationContext';
 import api from '../services/api';
 import { registerUser } from '../services/registration';
 
@@ -15,6 +16,7 @@ const getSavedDraftEmail = () => {
 function VerifyEmail() {
   const location = useLocation();
   const navigate = useNavigate();
+  const { secrets, setSecrets } = useRegistration();
   const [email] = useState(location.state?.email || getSavedDraftEmail());
   const [code, setCode] = useState('');
   const [error, setError] = useState('');
@@ -41,7 +43,8 @@ function VerifyEmail() {
     try {
       await api.post('/auth/verify-email', { email, code });
 
-      const draft = JSON.parse(sessionStorage.getItem('sirkome_registration_draft') || 'null');
+      const storedDraft = JSON.parse(sessionStorage.getItem('sirkome_registration_draft') || 'null');
+      const draft = storedDraft ? { ...storedDraft, ...secrets } : null;
       if (!draft) {
         setError('Registration details were not found. Please return to registration and try again.');
         return;
@@ -60,6 +63,7 @@ function VerifyEmail() {
       try {
         await registerUser(draft);
         sessionStorage.removeItem('sirkome_registration_draft');
+        setSecrets({});
         sessionStorage.removeItem(REGISTRATION_LOCK_KEY);
         navigate('/login', { replace: true });
       } catch (registrationError) {

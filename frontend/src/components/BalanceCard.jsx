@@ -1,6 +1,8 @@
 import { CreditCard, Visibility, VisibilityOff } from '@mui/icons-material';
 import { useState } from 'react';
 
+import AccountNumberCopy from './AccountNumberCopy';
+
 function BalanceCard({ balance, accountNumber, userName, onSend }) {
   const [showAccountNumber, setShowAccountNumber] = useState(false);
   const [showBalance, setShowBalance] = useState(false);
@@ -45,6 +47,7 @@ function BalanceCard({ balance, accountNumber, userName, onSend }) {
             >
               {showAccountNumber ? <VisibilityOff fontSize="small" /> : <Visibility fontSize="small" />}
             </button>
+            <AccountNumberCopy accountNumber={accountNumber} className="text-slate-200" />
           </div>
           <button
             type="button"

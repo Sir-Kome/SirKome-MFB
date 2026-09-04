@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
-import { ContentCopy, Delete, LockOpen, PauseCircle, People } from '@mui/icons-material';
+import { Delete, LockOpen, PauseCircle, People } from '@mui/icons-material';
 
+import AccountNumberCopy from '../components/AccountNumberCopy';
 import Navbar from '../components/Navbar';
 import Sidebar from '../components/Sidebar';
 import api from '../services/api';
@@ -15,7 +16,6 @@ function AdminUsers() {
   const [reason, setReason] = useState({});
   const [busyId, setBusyId] = useState('');
   const [message, setMessage] = useState('');
-  const [copiedAccount, setCopiedAccount] = useState('');
 
   useEffect(() => {
     const token = sessionStorage.getItem('sirkome_token');
@@ -108,25 +108,7 @@ function AdminUsers() {
                         <p className="mt-1 truncate text-sm text-slate-500">{entry.email}</p>
                         <div className="mt-1 flex items-center gap-2 text-sm text-slate-400">
                           <span>{entry.account_number || 'No account number'}</span>
-                          <button
-                            type="button"
-                            aria-label="Copy account number"
-                            title="Copy account number"
-                            onClick={async () => {
-                              if (!entry.account_number) return;
-                              try {
-                                await navigator.clipboard.writeText(entry.account_number);
-                                setCopiedAccount(entry.account_number);
-                                window.setTimeout(() => setCopiedAccount(''), 1200);
-                              } catch {
-                                setCopiedAccount('');
-                              }
-                            }}
-                            className="rounded-xl p-1 transition hover:bg-slate-200"
-                          >
-                            <ContentCopy fontSize="small" />
-                          </button>
-                          {copiedAccount === entry.account_number ? <span className="text-[10px] uppercase tracking-wide text-emerald-600">Copied</span> : null}
+                          <AccountNumberCopy accountNumber={entry.account_number} />
                         </div>
                         <p className="text-sm text-slate-400">{entry.currency} {Number(entry.balance || 0).toFixed(2)}</p>
                       </div>
