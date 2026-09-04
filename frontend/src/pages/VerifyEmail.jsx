@@ -111,16 +111,20 @@ function VerifyEmail() {
   };
 
   return (
-    <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(34,211,238,0.2),_transparent_30%),linear-gradient(135deg,_#f4f7ff_0%,_#eef2ff_100%)] px-4 py-6 text-slate-800 sm:px-6 lg:px-8">
-      <div className="mx-auto flex min-h-[calc(100vh-3rem)] max-w-5xl flex-col overflow-hidden rounded-[32px] border border-white/70 bg-white/80 shadow-2xl backdrop-blur lg:flex-row">
-        <div className="flex flex-1 flex-col justify-center bg-gradient-to-br from-slate-950 via-slate-900 to-violet-950 p-8 text-white sm:p-10 lg:p-14">
+    <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(34,211,238,0.2),_transparent_30%),linear-gradient(135deg,_#f4f7ff_0%,_#eef2ff_100%)] px-3 py-4 text-slate-800 sm:px-6 sm:py-6 lg:px-8">
+      <div className="mx-auto flex min-h-[calc(100vh-2rem)] max-w-5xl flex-col overflow-hidden rounded-[28px] border border-white/70 bg-white/80 shadow-2xl backdrop-blur sm:min-h-[calc(100vh-3rem)] sm:rounded-[32px] lg:flex-row">
+        <div className="hidden flex-1 flex-col justify-center bg-gradient-to-br from-slate-950 via-slate-900 to-violet-950 p-8 text-white lg:flex lg:p-14">
           <p className="text-sm font-medium uppercase tracking-[0.3em] text-cyan-400">Email verification</p>
           <h1 className="mt-3 text-3xl font-semibold sm:text-4xl">Confirm your email before opening an account</h1>
           <p className="mt-4 max-w-md text-base text-slate-300">Enter the six-digit code sent to your email address. The code is valid for 15 minutes.</p>
         </div>
 
-        <div className="flex flex-1 items-center justify-center p-6 sm:p-8 lg:p-10">
-          <form onSubmit={handleVerify} className="w-full max-w-md rounded-[28px] border border-slate-200 bg-white p-6 shadow-lg sm:p-8">
+        <div className="flex flex-1 items-center justify-center px-2 py-6 sm:p-8 lg:p-10">
+          <form onSubmit={handleVerify} className="w-full max-w-md rounded-[24px] border border-slate-200 bg-white p-5 shadow-lg sm:rounded-[28px] sm:p-8">
+            <div className="mb-8 flex items-center gap-3 lg:hidden">
+              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-cyan-400 to-violet-500 font-semibold text-white">SB</div>
+              <div><p className="text-xs uppercase tracking-[0.2em] text-slate-500">Secure banking</p><p className="font-semibold text-slate-900">SirKome Bank</p></div>
+            </div>
             <p className="text-sm font-medium uppercase tracking-[0.3em] text-cyan-600">Verify email</p>
             <h2 className="mt-2 text-2xl font-semibold text-slate-900">Enter your code</h2>
             <p className="mt-3 text-sm text-slate-500">Code sent to <span className="font-medium text-slate-700">{email}</span></p>

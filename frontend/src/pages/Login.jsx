@@ -66,9 +66,9 @@ function Login() {
   };
 
   return (
-    <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(34,211,238,0.2),_transparent_30%),linear-gradient(135deg,_#f4f7ff_0%,_#eef2ff_100%)] px-4 py-6 text-slate-800 sm:px-6 lg:px-8">
-      <div className="mx-auto flex min-h-[calc(100vh-3rem)] max-w-6xl flex-col overflow-hidden rounded-[32px] border border-white/70 bg-white/80 shadow-2xl backdrop-blur lg:flex-row">
-        <div className="relative flex min-h-[520px] flex-1 flex-col justify-between overflow-hidden bg-gradient-to-br from-slate-950 via-slate-900 to-violet-950 p-8 text-white sm:p-10 lg:min-h-0 lg:p-14">
+    <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(34,211,238,0.2),_transparent_30%),linear-gradient(135deg,_#f4f7ff_0%,_#eef2ff_100%)] px-3 py-4 text-slate-800 sm:px-6 sm:py-6 lg:px-8">
+      <div className="mx-auto flex min-h-[calc(100vh-2rem)] max-w-6xl flex-col overflow-hidden rounded-[28px] border border-white/70 bg-white/80 shadow-2xl backdrop-blur sm:min-h-[calc(100vh-3rem)] sm:rounded-[32px] lg:flex-row">
+        <div className="relative hidden min-h-[520px] flex-1 flex-col justify-between overflow-hidden bg-gradient-to-br from-slate-950 via-slate-900 to-violet-950 p-8 text-white lg:flex lg:min-h-0 lg:p-14">
           <div className="mb-8 flex items-center gap-3">
             <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-cyan-400 to-violet-500 font-semibold">
               SB
@@ -110,8 +110,12 @@ function Login() {
 
         </div>
 
-        <div className="flex flex-1 items-center justify-center p-6 sm:p-8 lg:p-10">
-          <form onSubmit={handleLogin} className="w-full max-w-md rounded-[28px] border border-slate-200 bg-white p-6 shadow-lg sm:p-8">
+        <div className="flex flex-1 items-center justify-center px-2 py-8 sm:p-8 lg:p-10">
+          <form onSubmit={handleLogin} className="w-full max-w-md rounded-[24px] border border-slate-200 bg-white p-5 shadow-lg sm:rounded-[28px] sm:p-8">
+            <div className="mb-8 flex items-center gap-3 lg:hidden">
+              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-cyan-400 to-violet-500 font-semibold text-white">SB</div>
+              <div><p className="text-xs uppercase tracking-[0.2em] text-slate-500">Secure banking</p><p className="font-semibold text-slate-900">SirKome Bank</p></div>
+            </div>
             <p className="text-sm font-medium uppercase tracking-[0.3em] text-cyan-600">Welcome back</p>
             <h2 className="mt-2 text-2xl font-semibold text-slate-900">Sign in to your account</h2>
 
@@ -123,6 +127,7 @@ function Login() {
               className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 outline-none transition focus:border-cyan-500 focus:bg-white"
               placeholder="demo@sirkome.com"
               type="email"
+              autoComplete="email"
               value={email}
               onChange={(event) => setEmail(event.target.value)}
             />
@@ -137,6 +142,7 @@ function Login() {
                 className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 pr-12 outline-none transition focus:border-cyan-500 focus:bg-white"
                 placeholder="Enter your password"
                 type={showPassword ? 'text' : 'password'}
+                autoComplete="current-password"
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
               />

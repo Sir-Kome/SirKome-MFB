@@ -1,6 +1,9 @@
 import { AccountBalance, AdminPanelSettings, History, Home, Logout, People, Send } from '@mui/icons-material';
 import { useLocation, useNavigate } from 'react-router-dom';
 
+import MobileBottomNav from './MobileBottomNav';
+import { adminMobileItems, customerMobileItems } from './mobileNavItems';
+
 const customerMenuItems = [
   { label: 'Dashboard', icon: <Home fontSize="small" />, path: '/dashboard' },
   { label: 'Accounts', icon: <AccountBalance fontSize="small" />, path: '/accounts' },
@@ -19,6 +22,7 @@ function Sidebar() {
   const navigate = useNavigate();
   const user = JSON.parse(sessionStorage.getItem('sirkome_user') || 'null');
   const menuItems = user?.is_admin ? adminMenuItems : customerMenuItems;
+  const mobileItems = user?.is_admin ? adminMobileItems : customerMobileItems;
 
   const handleLogout = () => {
     sessionStorage.removeItem('sirkome_token');
@@ -27,7 +31,8 @@ function Sidebar() {
   };
 
   return (
-    <aside className="w-full rounded-[28px] bg-slate-950 p-6 text-white shadow-2xl xl:w-72">
+    <>
+      <aside className="hidden w-full rounded-[28px] bg-slate-950 p-6 text-white shadow-2xl xl:block xl:w-72">
       <div className="mb-8 flex items-center gap-3">
         <button type="button" onClick={() => navigate('/profile')} aria-label="Open profile" title="Open profile" className="flex h-14 w-14 shrink-0 flex-col items-center justify-center rounded-2xl bg-gradient-to-br from-cyan-400 via-sky-500 to-violet-500 font-semibold transition hover:scale-105">
           <span className="text-base leading-none">SB</span>
@@ -69,7 +74,9 @@ function Sidebar() {
         <Logout fontSize="small" />
         <span>Logout</span>
       </button>
-    </aside>
+      </aside>
+      <MobileBottomNav items={mobileItems} />
+    </>
   );
 }
 

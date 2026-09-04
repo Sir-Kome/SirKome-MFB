@@ -77,17 +77,17 @@ function Transactions() {
             ) : (
               <div className="space-y-3">
                 {transactions.map((item, index) => (
-                  <div key={`${item.description}-${index}`} className="flex items-center justify-between rounded-2xl bg-slate-50 px-4 py-3">
-                    <div className="flex items-center gap-3">
+                  <div key={`${item.description}-${index}`} className="flex items-center justify-between gap-3 rounded-2xl bg-slate-50 px-4 py-3">
+                    <div className="flex min-w-0 items-center gap-3">
                       <div className="rounded-2xl bg-slate-900 p-2 text-white">
                         <History fontSize="small" />
                       </div>
                       <div>
-                        <p className="font-medium text-slate-800">{item.description}</p>
+                        <p className="break-words font-medium text-slate-800">{item.description}</p>
                         <p className="text-sm text-slate-500">{item.date}</p>
                       </div>
                     </div>
-                    <span className={`font-semibold ${item.type === 'credit' ? 'text-emerald-600' : 'text-slate-700'}`}>
+                    <span className={`shrink-0 text-right font-semibold ${item.type === 'credit' ? 'text-emerald-600' : 'text-slate-700'}`}>
                       {item.type === 'credit' ? '+' : '-'}₦{item.amount.toFixed(2)}
                     </span>
                   </div>
