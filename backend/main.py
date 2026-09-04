@@ -684,7 +684,7 @@ def get_existing_registration_field(email: str, phone: str, nin: str, bvn: str):
 
         if matched_field:
             print(f"Duplicate registration detected: {matched_field}")
-            return user
+            return user, matched_field
     return None
 
 
@@ -1027,7 +1027,11 @@ def register(payload: RegisterRequest):
 
     existing_user = get_existing_registration_field(normalized_email, phone, nin, bvn)
     if existing_user:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Existing user found. Do you want to login?")
+        _, matched_field = existing_user
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Existing user found. Do you want to login? Duplicate field: {matched_field}",
+        )
 
     cached_entry = VERIFICATION_CACHE.get(normalized_email)
     if not cached_entry or not bool(cached_entry.get("used", False)):
