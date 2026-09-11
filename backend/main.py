@@ -395,6 +395,10 @@ class NotificationPageResponse(BaseModel):
     items: list[NotificationResponse]
 
 
+def sqlite_decimal_value(value: Decimal | float | int | str) -> float:
+    return float(value)
+
+
 def get_connection():
     if os.getenv("DATABASE_URL"):
         return PostgresConnection()
@@ -1394,6 +1398,7 @@ def require_teller_operation(credentials: HTTPAuthorizationCredentials | None, p
 
 def process_teller_operation(payload: TellerOperationRequest, current_user, transaction_type: str):
     amount = validate_teller_amount(payload.amount)
+    sqlite_amount = sqlite_decimal_value(amount)
     idempotency_key = (payload.idempotency_key or "").strip() or None
     description = (payload.description or "").strip() or transaction_type.title()
     context = get_staff_context(current_user)
@@ -1407,7 +1412,7 @@ def process_teller_operation(payload: TellerOperationRequest, current_user, tran
                 (idempotency_key,),
             ).fetchone()
             if existing:
-                if existing["account_number"] != resolve_account_number(payload.account_number) or Decimal(existing["amount"]) != amount or existing["type"] != transaction_type:
+                if existing["account_number"] != resolve_account_number(payload.account_number) or Decimal(str(existing["amount"])) != amount or existing["type"] != transaction_type:
                     raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Idempotency key was already used for another transaction")
                 return serialize_teller_transaction(existing)
 
@@ -1422,14 +1427,14 @@ def process_teller_operation(payload: TellerOperationRequest, current_user, tran
         if transaction_type == "WITHDRAWAL":
             updated_wallet = conn.execute(
                 "UPDATE wallets SET wallet_balance = wallet_balance - ? WHERE account_number = ? AND wallet_balance >= ? RETURNING wallet_balance",
-                (amount, customer["account_number"], amount),
+                (sqlite_amount, customer["account_number"], sqlite_amount),
             ).fetchone()
             if not updated_wallet:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Insufficient funds")
         else:
             updated_wallet = conn.execute(
                 "UPDATE wallets SET wallet_balance = wallet_balance + ? WHERE account_number = ? RETURNING wallet_balance",
-                (amount, customer["account_number"]),
+                (sqlite_amount, customer["account_number"]),
             ).fetchone()
 
         transaction = conn.execute(
@@ -1441,7 +1446,7 @@ def process_teller_operation(payload: TellerOperationRequest, current_user, tran
             RETURNING transaction_reference, type, amount, status, account_number,
                       description, date, branch_id
             """,
-            (customer["account_number"], transaction_type, amount, description, transaction_reference, idempotency_key, current_user["id"], context["branch_id"]),
+            (customer["account_number"], transaction_type, sqlite_amount, description, transaction_reference, idempotency_key, current_user["id"], context["branch_id"]),
         ).fetchone()
         conn.commit()
 
