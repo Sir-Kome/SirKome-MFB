@@ -7,9 +7,12 @@ import Navbar from '../components/Navbar';
 import Sidebar from '../components/Sidebar';
 import api from '../services/api';
 
-function AdminDashboard() {
+function AdminDashboard({ staffMode = false }) {
   const navigate = useNavigate();
   const user = JSON.parse(sessionStorage.getItem('sirkome_user') || 'null');
+  const isStaff = user?.user_type === 'STAFF' || user?.is_admin;
+  const canViewCustomers = Boolean(user?.is_admin || user?.permissions?.includes('view_all_customers'));
+  const canViewTransactions = Boolean(user?.is_admin || user?.permissions?.includes('view_transactions'));
   const [summary, setSummary] = useState({ total: 0, frozen: 0, admins: 0 });
   const [accounts, setAccounts] = useState([]);
   const [transactions, setTransactions] = useState([]);
@@ -18,20 +21,20 @@ function AdminDashboard() {
 
   useEffect(() => {
     const token = sessionStorage.getItem('sirkome_token');
-    if (!token || !user?.is_admin) {
-      navigate('/login');
+    if (!token || (staffMode ? !isStaff : !user?.is_admin)) {
+      navigate(staffMode ? '/staff/login' : '/login');
       return;
     }
 
     Promise.all([
-      api.get('/admin/users', {
+      canViewCustomers ? api.get('/admin/users', {
         params: { page: 1, per_page: 100 },
         headers: { Authorization: `Bearer ${token}` },
-      }),
-      api.get('/transactions', {
+      }) : Promise.resolve({ data: [] }),
+      canViewTransactions ? api.get('/transactions', {
         params: { page: 1, per_page: 5 },
         headers: { Authorization: `Bearer ${token}` },
-      }),
+      }) : Promise.resolve({ data: [] }),
     ])
       .then(([usersResponse, transactionsResponse]) => {
         const users = usersResponse.data?.items || usersResponse.data || [];
@@ -43,11 +46,12 @@ function AdminDashboard() {
         });
         setTransactions(transactionsResponse.data?.items || []);
       })
-      .catch(() => navigate('/login'));
-  }, [navigate, user?.is_admin]);
+        .catch(() => navigate(staffMode ? '/staff/login' : '/login'));
+      }, [canViewCustomers, canViewTransactions, isStaff, navigate, staffMode, user?.is_admin]);
 
-  if (!user) return <Navigate to="/login" replace />;
-  if (!user.is_admin) return <Navigate to="/dashboard" replace />;
+      if (!user) return <Navigate to={staffMode ? '/staff/login' : '/login'} replace />;
+      if (staffMode && !isStaff) return <Navigate to="/staff/login" replace />;
+      if (!staffMode && !user.is_admin) return <Navigate to="/dashboard" replace />;
 
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top_right,_rgba(244,63,94,0.16),_transparent_35%),linear-gradient(135deg,_#fff7f5_0%,_#f1f5f9_100%)] px-4 py-5 text-slate-800 sm:px-6 lg:px-8">
@@ -59,7 +63,7 @@ function AdminDashboard() {
             <div className="flex flex-col justify-between gap-6 sm:flex-row sm:items-end">
               <div>
                 <p className="text-sm font-medium uppercase tracking-[0.18em] text-rose-300">Operations console</p>
-                <h1 className="mt-2 text-3xl font-semibold">Admin dashboard</h1>
+                <h1 className="mt-2 text-3xl font-semibold">{staffMode ? `${user.role || 'Staff'} dashboard` : 'Admin dashboard'}</h1>
                 <p className="mt-2 max-w-xl text-sm text-slate-300">Monitor customer accounts, balances, and recent banking activity from one place.</p>
               </div>
               <AdminPanelSettings className="text-rose-300" sx={{ fontSize: 56 }} />
@@ -169,8 +173,8 @@ function AdminDashboard() {
                     <div key={`${item.description}-${index}`} className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3">
                       <div className="flex items-center justify-between gap-3">
                         <p className="font-medium text-slate-800">{item.description}</p>
-                        <span className={`font-semibold ${item.type === 'credit' ? 'text-emerald-600' : 'text-slate-700'}`}>
-                          {item.type === 'credit' ? '+' : '-'}₦{Number(item.amount || 0).toFixed(2)}
+                        <span className={`font-semibold ${['credit', 'DEPOSIT'].includes(item.type) ? 'text-emerald-600' : 'text-slate-700'}`}>
+                          {['credit', 'DEPOSIT'].includes(item.type) ? '+' : '-'}₦{Number(item.amount || 0).toFixed(2)}
                         </span>
                       </div>
                       <div className="mt-1 flex items-center justify-between text-xs text-slate-500">

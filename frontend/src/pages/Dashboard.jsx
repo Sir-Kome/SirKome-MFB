@@ -145,8 +145,8 @@ function Dashboard() {
                           <p className="text-sm text-slate-500">{item.date}</p>
                         </div>
                       </div>
-                      <span className={`font-semibold ${item.type === 'credit' ? 'text-emerald-600' : 'text-slate-700'}`}>
-                        {item.type === 'credit' ? '+' : '-'}₦{item.amount.toFixed(2)}
+                      <span className={`font-semibold ${['credit', 'DEPOSIT'].includes(item.type) ? 'text-emerald-600' : 'text-slate-700'}`}>
+                        {['credit', 'DEPOSIT'].includes(item.type) ? '+' : '-'}₦{item.amount.toFixed(2)}
                       </span>
                     </div>
                   ))}

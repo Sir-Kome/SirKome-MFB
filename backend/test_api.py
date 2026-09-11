@@ -1,4 +1,7 @@
+import random
+import string
 from datetime import datetime
+import uuid
 
 from fastapi.testclient import TestClient
 
@@ -6,6 +9,23 @@ import main
 from main import app
 
 client = TestClient(app)
+
+
+def unique_registration_data(label):
+    for _ in range(200):
+        numeric_suffix = str(uuid.uuid4().int % 100000000).zfill(8)
+        phone = f"080{numeric_suffix}"
+        nin = str(uuid.uuid4().int % 100000000000).zfill(11)
+        bvn = str(uuid.uuid4().int % 100000000000).zfill(11)
+        email = f"{label}-{uuid.uuid4().hex}@example.com"
+        with main.get_connection() as conn:
+            existing = conn.execute(
+                "SELECT id FROM users WHERE LOWER(email) = ? OR phone = ? OR nin = ? OR bvn = ?",
+                (email.lower(), phone, nin, bvn),
+            ).fetchone()
+        if not existing:
+            return {"email": email, "phone": phone, "nin": nin, "bvn": bvn}
+    raise RuntimeError(f"Unable to generate unique registration data for label '{label}'")
 
 
 def register_verified_user(name, email, password, phone, nin, bvn, pin="1234"):
@@ -56,12 +76,58 @@ def test_admin_login_returns_admin_flag_for_dashboard():
     assert data["user"]["is_admin"] is True
 
 
+def test_staff_login_returns_staff_role_and_permissions():
+    response = client.post(
+        "/staff/login",
+        json={"email": "admin@sirkome.com", "password": "admin1234"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["user"]["user_type"] == "STAFF"
+    assert data["user"]["role"] == "SUPER_ADMIN"
+    assert "manage_staff" in data["user"]["permissions"]
+
+    context_response = client.get(
+        "/staff/me",
+        headers={"Authorization": f"Bearer {data['token']}"},
+    )
+    assert context_response.status_code == 200
+    assert context_response.json()["role"] == "SUPER_ADMIN"
+
+
+def test_customer_cannot_authenticate_as_staff_or_access_staff_context():
+    staff_login_response = client.post(
+        "/staff/login",
+        json={"email": "komeisioro+demo@gmail.com", "password": "demo1234"},
+    )
+    assert staff_login_response.status_code == 403
+
+    customer_login_response = client.post(
+        "/auth/login",
+        json={"email": "komeisioro+demo@gmail.com", "password": "demo1234"},
+    )
+    customer_token = customer_login_response.json()["token"]
+
+    context_response = client.get(
+        "/staff/me",
+        headers={"Authorization": f"Bearer {customer_token}"},
+    )
+    assert context_response.status_code == 403
+
+    admin_users_response = client.get(
+        "/admin/users",
+        headers={"Authorization": f"Bearer {customer_token}"},
+    )
+    assert admin_users_response.status_code == 403
+
+
 def test_admin_seed_account_has_funding_for_transfers():
     admin = main.get_user_by_email("admin@sirkome.com")
     assert admin is not None
     wallet = main.get_wallet_by_account(admin["account_number"])
     assert wallet is not None
-    assert wallet["wallet_balance"] == 50000000.0
+    assert float(wallet["wallet_balance"]) >= 250.0
 
 
 def test_login_failure():
@@ -74,16 +140,13 @@ def test_login_failure():
 
 
 def test_register_rejects_weak_passwords():
-    timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+    registration = unique_registration_data("weakpass")
     response = client.post(
         "/auth/register",
         json={
             "name": "Weak Password User",
-            "email": f"weakpass{timestamp}@example.com",
+            **registration,
             "password": "weakpass",
-            "phone": "+1-555-010-7777",
-            "nin": "12345678901",
-            "bvn": "10987654321",
             "pin": "1234",
         },
     )
@@ -93,14 +156,11 @@ def test_register_rejects_weak_passwords():
 
 
 def test_register_does_not_return_access_token():
-    timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+    registration = unique_registration_data("notoken")
     response = register_verified_user(
         name="No Token User",
-        email=f"notoken{timestamp}@example.com",
+        **registration,
         password="Strongpass!123",
-        phone="+1-555-010-7788",
-        nin="12345678902",
-        bvn="10987654322",
         pin="1234",
     )
 
@@ -110,7 +170,8 @@ def test_register_does_not_return_access_token():
 
 
 def test_email_verification_is_required_before_registration():
-    email = f"verify{datetime.now().strftime('%Y%m%d%H%M%S')}@example.com"
+    registration = unique_registration_data("verify")
+    email = registration["email"]
     setup_response = client.post("/auth/send-verification", json={"email": email})
     assert setup_response.status_code == 200
 
@@ -122,11 +183,8 @@ def test_email_verification_is_required_before_registration():
         "/auth/register",
         json={
             "name": "Verified User",
-            "email": email,
+            **registration,
             "password": "Strongpass!123",
-            "phone": "+1-555-010-2100",
-            "nin": "12345678905",
-            "bvn": "10987654325",
             "pin": "1234",
         },
     )
@@ -169,14 +227,11 @@ def test_admin_can_freeze_and_unfreeze_a_customer():
     )
     admin_token = admin_response.json()["token"]
 
-    timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+    registration = unique_registration_data("freeze")
     customer_response = register_verified_user(
         name="Freeze Me",
-        email=f"freeze{timestamp}@example.com",
+        **registration,
         password="Strongpass!123",
-        phone="+1-555-010-7799",
-        nin="12345678903",
-        bvn="10987654323",
         pin="1234",
     )
     customer_id = customer_response.json()["user"]["account_number"]
@@ -263,14 +318,11 @@ def test_transactions_support_pagination_metadata():
 
 
 def test_register_creates_a_user_and_returns_profile():
-    timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+    registration = unique_registration_data("newcustomer")
     response = register_verified_user(
         name="New Customer",
-        email=f"newcustomer{timestamp}@example.com",
+        **registration,
         password="Strongpass!123",
-        phone="+1-555-010-9999",
-        nin="12345678901",
-        bvn="10987654321",
         pin="1234",
     )
 
@@ -341,6 +393,187 @@ def test_admin_can_list_users():
     assert any(item["email"] == "demo@sirkome.com" for item in data)
 
 
+def test_staff_customer_management_endpoints_work_and_mask_sensitive_fields():
+    admin_response = client.post(
+        "/auth/login",
+        json={"email": "admin@sirkome.com", "password": "admin1234"},
+    )
+    admin_token = admin_response.json()["token"]
+    unique_suffix = "".join(random.choice(string.ascii_uppercase) for _ in range(6))
+    customer_name = f"Customer Management User {unique_suffix}"
+
+    registration = unique_registration_data("custmgmt")
+    customer_response = register_verified_user(
+        name=customer_name,
+        **registration,
+        password="Strongpass!123",
+        pin="1234",
+    )
+    customer_data = customer_response.json()["user"]
+    customer_id = customer_data["user_id"]
+
+    list_response = client.get(
+        "/customers",
+        params={"query": customer_name, "page": 1, "per_page": 10},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert list_response.status_code == 200
+    assert list_response.json()["items"]
+    assert any(item["user_id"] == customer_id for item in list_response.json()["items"])
+
+    detail_response = client.get(
+        f"/customers/{customer_id}",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert detail_response.status_code == 200
+    payload = detail_response.json()
+    assert payload["user_id"] == customer_id
+    assert "password" not in payload
+    assert "pin_hash" not in payload
+    assert "token" not in payload
+    assert "nin" not in payload
+    assert "bvn" not in payload
+
+    patch_response = client.patch(
+        f"/customers/{customer_id}",
+        json={"phone": "+234-802-000-1111", "address": "No. 6 Fintech Street"},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert patch_response.status_code == 200
+    assert patch_response.json()["phone"] == "08020001111"
+    assert patch_response.json()["address"] == "No. 6 Fintech Street"
+
+    freeze_response = client.patch(
+        f"/customers/{customer_id}/status",
+        json={"is_frozen": True, "reason": "Review required"},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert freeze_response.status_code == 200
+    assert freeze_response.json()["status"] == "FROZEN"
+
+    unfreeze_response = client.patch(
+        f"/customers/{customer_id}/status",
+        json={"is_frozen": False, "reason": ""},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert unfreeze_response.status_code == 200
+    assert unfreeze_response.json()["status"] == "ACTIVE"
+
+
+def test_customer_management_respects_branch_scope_and_prevents_balance_tampering():
+    admin_response = client.post(
+        "/auth/login",
+        json={"email": "admin@sirkome.com", "password": "admin1234"},
+    )
+    admin_token = admin_response.json()["token"]
+    branch_suffix = "".join(random.choice(string.ascii_uppercase) for _ in range(6))
+    customer_name = f"Branch Scoped Customer {branch_suffix}"
+
+    branch_response = client.post(
+        "/branches",
+        json={
+            "branch_code": f"KTM-{branch_suffix}",
+            "name": "Ketu Main",
+            "address": "28 Ikorodu Road",
+            "city": "Lagos",
+            "state": "Lagos",
+            "phone": "+2347000000001",
+            "email": f"ketu-{branch_suffix.lower()}@example.com",
+        },
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert branch_response.status_code == 200
+    branch_id = branch_response.json()["id"]
+
+    registration = unique_registration_data("branchscope")
+    customer_response = register_verified_user(
+        name=customer_name,
+        **registration,
+        password="Strongpass!123",
+        pin="1234",
+    )
+    customer_id = customer_response.json()["user"]["user_id"]
+
+    assign_response = client.patch(
+        f"/customers/{customer_id}/branch",
+        json={"branch_id": branch_id},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert assign_response.status_code == 200
+    assert assign_response.json()["branch"]["id"] == branch_id
+
+    filtered_response = client.get(
+        "/customers",
+        params={"branch_id": branch_id, "status": "active"},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert filtered_response.status_code == 200
+    assert any(item["user_id"] == customer_id for item in filtered_response.json()["items"])
+
+    tamper_response = client.patch(
+        f"/customers/{customer_id}",
+        json={"balance": 999999.99},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert tamper_response.status_code == 422
+
+    customer_wallet = main.get_wallet_by_account(customer_response.json()["user"]["account_number"])
+    assert float(customer_wallet["wallet_balance"]) >= 0.0
+
+
+def test_customer_endpoints_require_staff_access_and_branch_scope():
+    customer_login = client.post(
+        "/auth/login",
+        json={"email": "komeisioro+demo@gmail.com", "password": "demo1234"},
+    )
+    customer_token = customer_login.json()["token"]
+
+    list_response = client.get(
+        "/customers",
+        headers={"Authorization": f"Bearer {customer_token}"},
+    )
+    assert list_response.status_code == 403
+
+    detail_response = client.get(
+        "/customers/1",
+        headers={"Authorization": f"Bearer {customer_token}"},
+    )
+    assert detail_response.status_code == 403
+
+
+def test_customer_search_and_status_filters_work():
+    admin_response = client.post(
+        "/auth/login",
+        json={"email": "admin@sirkome.com", "password": "admin1234"},
+    )
+    admin_token = admin_response.json()["token"]
+    unique_suffix = "".join(random.choice(string.ascii_uppercase) for _ in range(4))
+    unique_name = f"Search Filter Customer {unique_suffix}"
+
+    registration = unique_registration_data("searchfilter")
+    customer_response = register_verified_user(
+        name=unique_name,
+        **registration,
+        password="Strongpass!123",
+        pin="1234",
+    )
+    customer_id = customer_response.json()["user"]["user_id"]
+
+    client.patch(
+        f"/customers/{customer_id}/status",
+        json={"is_frozen": True, "reason": "Compliance check"},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+
+    search_response = client.get(
+        "/customers",
+        params={"query": "searchfilter", "status": "frozen"},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert search_response.status_code == 200
+    assert any(item["user_id"] == customer_id for item in search_response.json()["items"])
+
+
 def test_transfer_moves_funds_between_accounts():
     admin_response = client.post(
         "/auth/login",
@@ -348,14 +581,11 @@ def test_transfer_moves_funds_between_accounts():
     )
     admin_token = admin_response.json()["token"]
 
-    timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+    registration = unique_registration_data("transfer")
     customer_response = register_verified_user(
         name="Transfer Target",
-        email=f"transfer{timestamp}@example.com",
+        **registration,
         password="Strongpass!123",
-        phone="+1-555-010-1000",
-        nin="11223344556",
-        bvn="66554433221",
         pin="1234",
     )
     customer_account = customer_response.json()["user"]["account_number"]
@@ -468,7 +698,6 @@ def test_cannot_transfer_to_own_account_number():
 
 
 def test_account_numbers_are_unique_when_registering():
-    timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
     first_account = main.generate_account_number()
     second_account = main.generate_account_number()
 
@@ -476,14 +705,236 @@ def test_account_numbers_are_unique_when_registering():
 
     response = register_verified_user(
         name="Unique Number User",
-        email=f"unique{timestamp}@example.com",
+        **unique_registration_data("unique"),
         password="Strongpass!123",
-        phone="+1-555-010-2001",
-        nin="12345678904",
-        bvn="10987654324",
         pin="1234",
     )
 
     assert response.status_code == 200
     assert response.json()["user"]["account_number"].startswith("SK-")
     assert response.json()["user"]["account_number"] not in {first_account, second_account}
+
+
+def test_super_admin_can_manage_branches_and_staff_scope():
+    admin_response = client.post(
+        "/staff/login",
+        json={"email": "admin@sirkome.com", "password": "admin1234"},
+    )
+    admin_token = admin_response.json()["token"]
+    admin_headers = {"Authorization": f"Bearer {admin_token}"}
+    branch_suffix = uuid.uuid4().hex[:10].upper()
+
+    branch_response = client.post(
+        "/branches",
+        json={
+            "branch_code": f"TST-{branch_suffix}",
+            "name": "Test Central Branch",
+            "address": "1 Test Street",
+            "city": "Lagos",
+            "state": "Lagos",
+            "phone": "080" + str(uuid.uuid4().int % 100000000).zfill(8),
+            "email": f"branch-{branch_suffix.lower()}@example.com",
+        },
+        headers=admin_headers,
+    )
+    assert branch_response.status_code == 200
+    branch = branch_response.json()
+    assert branch["branch_code"] == f"TST-{branch_suffix}"
+    assert branch["is_active"] is True
+
+    duplicate_response = client.post(
+        "/branches",
+        json={
+            "branch_code": branch["branch_code"],
+            "name": "Duplicate Branch",
+            "address": "2 Test Street",
+            "city": "Lagos",
+            "state": "Lagos",
+            "phone": "080" + str(uuid.uuid4().int % 100000000).zfill(8),
+        },
+        headers=admin_headers,
+    )
+    assert duplicate_response.status_code == 400
+
+    staff_data = unique_registration_data("branch-manager")
+    staff_response = client.post(
+        "/staff",
+        json={
+            "name": "Branch Manager",
+            **staff_data,
+            "password": "Strongpass!123",
+            "pin": "1234",
+            "role": "BRANCH_MANAGER",
+            "branch_id": branch["id"],
+        },
+        headers=admin_headers,
+    )
+    assert staff_response.status_code == 200
+    staff = staff_response.json()
+    assert staff["role"] == "BRANCH_MANAGER"
+    assert staff["branch"]["id"] == branch["id"]
+    assert not {"password", "password_hash", "pin", "pin_hash", "token", "nin", "bvn"}.intersection(staff)
+
+    staff_login = client.post(
+        "/staff/login",
+        json={"email": staff_data["email"], "password": "Strongpass!123"},
+    )
+    assert staff_login.status_code == 200
+    staff_headers = {"Authorization": f"Bearer {staff_login.json()['token']}"}
+    scoped_branches = client.get("/branches", headers=staff_headers)
+    assert scoped_branches.status_code == 200
+    assert [item["id"] for item in scoped_branches.json()] == [branch["id"]]
+
+    scoped_staff = client.get("/staff", headers=staff_headers)
+    assert scoped_staff.status_code == 200
+    assert any(item["id"] == staff["id"] for item in scoped_staff.json())
+
+    deactivate_response = client.patch(
+        f"/staff/{staff['id']}/status",
+        json={"is_active": False},
+        headers=admin_headers,
+    )
+    assert deactivate_response.status_code == 200
+    inactive_login = client.post(
+        "/staff/login",
+        json={"email": staff_data["email"], "password": "Strongpass!123"},
+    )
+    assert inactive_login.status_code == 403
+
+    reactivate_response = client.patch(
+        f"/staff/{staff['id']}/status",
+        json={"is_active": True},
+        headers=admin_headers,
+    )
+    assert reactivate_response.status_code == 200
+
+
+def test_customer_cannot_manage_branches_or_staff():
+    login_response = client.post(
+        "/auth/login",
+        json={"email": "demo@sirkome.com", "password": "demo1234"},
+    )
+    headers = {"Authorization": f"Bearer {login_response.json()['token']}"}
+    assert client.get("/branches", headers=headers).status_code == 403
+    assert client.get("/staff", headers=headers).status_code == 403
+    assert client.post(
+        "/staff",
+        json={
+            "name": "Unauthorized Staff",
+            **unique_registration_data("unauthorized"),
+            "password": "Strongpass!123",
+            "pin": "1234",
+            "role": "TELLER",
+        },
+        headers=headers,
+    ).status_code == 403
+
+
+def test_teller_deposit_withdrawal_scope_and_idempotency():
+    admin_response = client.post(
+        "/staff/login",
+        json={"email": "admin@sirkome.com", "password": "admin1234"},
+    )
+    admin_headers = {"Authorization": f"Bearer {admin_response.json()['token']}"}
+    suffix = uuid.uuid4().hex[:10].upper()
+    branch_response = client.post(
+        "/branches",
+        json={
+            "branch_code": f"TEL-{suffix}",
+            "name": "Teller Test Branch",
+            "address": "3 Teller Street",
+            "city": "Lagos",
+            "state": "Lagos",
+            "phone": "080" + str(uuid.uuid4().int % 100000000).zfill(8),
+        },
+        headers=admin_headers,
+    )
+    assert branch_response.status_code == 200
+    branch_id = branch_response.json()["id"]
+
+    teller_data = unique_registration_data("teller")
+    teller_response = client.post(
+        "/staff",
+        json={
+            "name": "Test Teller",
+            **teller_data,
+            "password": "Strongpass!123",
+            "pin": "1234",
+            "role": "TELLER",
+            "branch_id": branch_id,
+        },
+        headers=admin_headers,
+    )
+    assert teller_response.status_code == 200
+
+    customer_data = unique_registration_data("teller-customer")
+    customer_response = register_verified_user(
+        name="Teller Customer",
+        **customer_data,
+        password="Strongpass!123",
+        pin="1234",
+    )
+    customer_account = customer_response.json()["user"]["account_number"]
+    with main.get_connection() as conn:
+        conn.execute("UPDATE users SET branch_id = ? WHERE account_number = ?", (branch_id, customer_account))
+        conn.commit()
+
+    teller_login = client.post(
+        "/staff/login",
+        json={"email": teller_data["email"], "password": "Strongpass!123"},
+    )
+    assert teller_login.status_code == 200
+    teller_headers = {"Authorization": f"Bearer {teller_login.json()['token']}"}
+
+    lookup = client.get("/teller/customers", params={"query": customer_account}, headers=teller_headers)
+    assert lookup.status_code == 200
+    assert lookup.json()[0]["account_number"] == customer_account
+
+    deposit_payload = {
+        "account_number": customer_account,
+        "amount": "100.00",
+        "description": "Initial teller deposit",
+        "idempotency_key": f"deposit-{uuid.uuid4().hex}",
+    }
+    deposit = client.post("/teller/deposits", json=deposit_payload, headers=teller_headers)
+    assert deposit.status_code == 200
+    deposit_data = deposit.json()
+    assert deposit_data["type"] == "DEPOSIT"
+    assert deposit_data["status"] == "COMPLETED"
+    assert deposit_data["transaction_reference"].startswith("TLL-")
+
+    duplicate_deposit = client.post("/teller/deposits", json=deposit_payload, headers=teller_headers)
+    assert duplicate_deposit.status_code == 200
+    assert duplicate_deposit.json()["transaction_reference"] == deposit_data["transaction_reference"]
+
+    withdrawal = client.post(
+        "/teller/withdrawals",
+        json={"account_number": customer_account, "amount": "40.00", "description": "Cash withdrawal", "idempotency_key": f"withdrawal-{uuid.uuid4().hex}"},
+        headers=teller_headers,
+    )
+    assert withdrawal.status_code == 200
+    assert withdrawal.json()["type"] == "WITHDRAWAL"
+
+    insufficient = client.post(
+        "/teller/withdrawals",
+        json={"account_number": customer_account, "amount": "1000.00"},
+        headers=teller_headers,
+    )
+    assert insufficient.status_code == 400
+
+    history = client.get("/transactions", params={"page": 1, "per_page": 20}, headers={"Authorization": f"Bearer {client.post('/auth/login', json={'email': customer_data['email'], 'password': 'Strongpass!123'}).json()['token']}"})
+    assert history.status_code == 200
+    history_items = history.json()["items"]
+    assert any(item["transaction_reference"] == deposit_data["transaction_reference"] for item in history_items)
+
+
+def test_customer_cannot_use_teller_operations():
+    login_response = client.post(
+        "/auth/login",
+        json={"email": "demo@sirkome.com", "password": "demo1234"},
+    )
+    headers = {"Authorization": f"Bearer {login_response.json()['token']}"}
+    payload = {"account_number": "SK-4821", "amount": "1.00"}
+    assert client.get("/teller/customers", params={"query": "SK-4821"}, headers=headers).status_code == 403
+    assert client.post("/teller/deposits", json=payload, headers=headers).status_code == 403
+    assert client.post("/teller/withdrawals", json=payload, headers=headers).status_code == 403

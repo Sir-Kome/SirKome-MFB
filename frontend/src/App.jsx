@@ -4,11 +4,15 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import Accounts from './pages/Accounts';
 import AdminDashboard from './pages/AdminDashboard';
 import AdminUsers from './pages/AdminUsers';
+import Branches from './pages/Branches';
 import Dashboard from './pages/Dashboard';
 import Login from './pages/Login';
 import Notifications from './pages/Notifications';
 import Profile from './pages/Profile';
 import Register from './pages/Register';
+import StaffDashboard from './pages/StaffDashboard';
+import StaffLogin from './pages/StaffLogin';
+import StaffManagement from './pages/StaffManagement';
 import Transfer from './pages/Transfer';
 import Transactions from './pages/Transactions';
 import VerifyEmail from './pages/VerifyEmail';
@@ -41,10 +45,15 @@ function App() {
           <Routes>
           <Route path="/" element={<Dashboard />} />
           <Route path="/login" element={<Login />} />
+          <Route path="/staff/login" element={<StaffLogin />} />
           <Route path="/register" element={<Register />} />
           <Route path="/verify-email" element={<VerifyEmail />} />
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/admin-dashboard" element={<AdminDashboard />} />
+          <Route path="/staff/dashboard" element={<StaffDashboard />} />
+          <Route path="/staff/teller" element={<StaffDashboard />} />
+          <Route path="/staff/management" element={<StaffManagement />} />
+          <Route path="/staff/branches" element={<Branches />} />
           <Route path="/admin/users" element={<AdminUsers />} />
           <Route path="/notifications" element={<Notifications />} />
           <Route path="/profile" element={<Profile />} />

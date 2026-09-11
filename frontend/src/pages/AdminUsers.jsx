@@ -10,6 +10,7 @@ import api from '../services/api';
 function AdminUsers() {
   const navigate = useNavigate();
   const user = JSON.parse(sessionStorage.getItem('sirkome_user') || 'null');
+  const canViewCustomers = Boolean(user?.is_admin || user?.permissions?.includes('view_all_customers'));
   const [users, setUsers] = useState([]);
   const [pageMeta, setPageMeta] = useState({ page: 1, pages: 1, total: 0 });
   const [page, setPage] = useState(1);
@@ -19,7 +20,7 @@ function AdminUsers() {
 
   useEffect(() => {
     const token = sessionStorage.getItem('sirkome_token');
-    if (!token || !user?.is_admin) {
+    if (!token || !canViewCustomers) {
       navigate('/login');
       return;
     }
@@ -30,7 +31,7 @@ function AdminUsers() {
         setPageMeta({ page: response.data?.page || page, pages: response.data?.pages || 1, total: response.data?.total || 0 });
       })
       .catch(() => navigate('/login'));
-  }, [navigate, page, user?.is_admin]);
+  }, [canViewCustomers, navigate, page]);
 
   const updateFreeze = async (entry, isFrozen) => {
     const identifier = entry.user_id || entry.account_number || String(entry.id);
@@ -74,7 +75,7 @@ function AdminUsers() {
   };
 
   if (!user) return <Navigate to="/login" replace />;
-  if (!user.is_admin) return <Navigate to="/dashboard" replace />;
+  if (!canViewCustomers) return <Navigate to="/dashboard" replace />;
 
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top_right,_rgba(244,63,94,0.16),_transparent_35%),linear-gradient(135deg,_#fff7f5_0%,_#f1f5f9_100%)] px-4 py-5 text-slate-800 sm:px-6 lg:px-8">

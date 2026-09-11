@@ -21,8 +21,17 @@ function Sidebar() {
   const location = useLocation();
   const navigate = useNavigate();
   const user = JSON.parse(sessionStorage.getItem('sirkome_user') || 'null');
-  const menuItems = user?.is_admin ? adminMenuItems : customerMenuItems;
-  const mobileItems = user?.is_admin ? adminMobileItems : customerMobileItems;
+  const isStaff = user?.user_type === 'STAFF';
+  const staffDashboardPath = location.pathname.startsWith('/staff/') ? '/staff/dashboard' : '/admin-dashboard';
+  const staffMenuItems = [
+    { label: 'Staff dashboard', icon: <AdminPanelSettings fontSize="small" />, path: user?.role === 'TELLER' ? '/staff/teller' : staffDashboardPath },
+    ...(user?.permissions?.includes('view_staff') ? [{ label: 'Staff management', icon: <People fontSize="small" />, path: '/staff/management' }] : []),
+    ...(user?.permissions?.includes('view_branches') || user?.permissions?.includes('view_assigned_branch') ? [{ label: 'Branches', icon: <AccountBalance fontSize="small" />, path: '/staff/branches' }] : []),
+    ...(user?.permissions?.includes('view_all_customers') ? [{ label: 'Customer management', icon: <People fontSize="small" />, path: '/admin/users' }] : []),
+    ...(user?.is_admin ? [{ label: 'Transfer', icon: <Send fontSize="small" />, path: '/transfer' }] : []),
+  ];
+  const menuItems = isStaff ? staffMenuItems : user?.is_admin ? adminMenuItems : customerMenuItems;
+  const mobileItems = isStaff ? adminMobileItems.map((item) => item.path === '/admin-dashboard' ? { ...item, path: staffDashboardPath } : item) : user?.is_admin ? adminMobileItems : customerMobileItems;
 
   const handleLogout = () => {
     sessionStorage.removeItem('sirkome_token');
@@ -39,7 +48,7 @@ function Sidebar() {
           <span className="mt-1 text-[9px] font-medium uppercase tracking-wide text-white/80">{user?.tier || 'Tier 1'}</span>
         </button>
         <div>
-          <p className="text-sm text-slate-400">{user?.is_admin ? 'Operations' : 'Personal banking'}</p>
+          <p className="text-sm text-slate-400">{isStaff ? (user?.role || 'Staff') : 'Personal banking'}</p>
           <h2 className="text-lg font-semibold">SirKome Bank</h2>
         </div>
       </div>
@@ -62,9 +71,9 @@ function Sidebar() {
       </nav>
 
       <div className="mt-10 rounded-3xl border border-white/10 bg-white/10 p-4 backdrop-blur">
-        <p className="text-sm text-slate-300">{user?.is_admin ? 'Admin workspace' : 'Spending insight'}</p>
-        <p className="mt-2 text-3xl font-semibold">{user?.is_admin ? 'Secure' : '₦1,280'}</p>
-        <p className="mt-1 text-sm text-emerald-300">{user?.is_admin ? 'Protected access' : 'Up 12% this month'}</p>
+        <p className="text-sm text-slate-300">{isStaff ? 'Staff workspace' : 'Spending insight'}</p>
+        <p className="mt-2 text-3xl font-semibold">{isStaff ? 'Secure' : '₦1,280'}</p>
+        <p className="mt-1 text-sm text-emerald-300">{isStaff ? 'Protected access' : 'Up 12% this month'}</p>
       </div>
 
       <button
