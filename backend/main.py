@@ -438,7 +438,8 @@ def init_db():
                 address TEXT,
                 proof_of_address_filename TEXT,
                 proof_of_address_data TEXT,
-                proof_of_address_date TEXT
+                proof_of_address_date TEXT,
+                branch_id INTEGER
             )
             """
         )
@@ -451,7 +452,12 @@ def init_db():
                 amount REAL NOT NULL,
                 description TEXT NOT NULL,
                 date TEXT NOT NULL,
-                related_account TEXT
+                related_account TEXT,
+                transaction_reference TEXT,
+                status TEXT,
+                idempotency_key TEXT,
+                staff_user_id INTEGER,
+                branch_id INTEGER
             )
             """
         )
@@ -465,6 +471,39 @@ def init_db():
                 currency TEXT NOT NULL DEFAULT 'NGN',
                 status TEXT NOT NULL DEFAULT 'active',
                 created_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS branches (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                branch_code TEXT UNIQUE NOT NULL,
+                name TEXT NOT NULL,
+                address TEXT NOT NULL,
+                city TEXT NOT NULL,
+                state TEXT NOT NULL,
+                phone TEXT NOT NULL,
+                email TEXT,
+                is_active INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS staff_profiles (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL UNIQUE,
+                staff_role TEXT NOT NULL,
+                branch_code TEXT,
+                branch_id INTEGER,
+                is_active INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                FOREIGN KEY (branch_id) REFERENCES branches(id) ON DELETE SET NULL
             )
             """
         )
@@ -505,6 +544,115 @@ def init_db():
             )
             """
         )
+        conn.execute("CREATE INDEX IF NOT EXISTS ix_branches_name ON branches(name)")
+        conn.execute("CREATE INDEX IF NOT EXISTS ix_branches_is_active ON branches(is_active)")
+        conn.execute("CREATE INDEX IF NOT EXISTS ix_staff_profiles_staff_role ON staff_profiles(staff_role)")
+        conn.execute("CREATE INDEX IF NOT EXISTS ix_staff_profiles_branch_code ON staff_profiles(branch_code)")
+        conn.execute("CREATE INDEX IF NOT EXISTS ix_staff_profiles_branch_id ON staff_profiles(branch_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS ix_staff_profiles_is_active ON staff_profiles(is_active)")
+        conn.execute("CREATE INDEX IF NOT EXISTS ix_users_branch_id ON users(branch_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS ix_transactions_staff_user_id ON transactions(staff_user_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS ix_transactions_branch_id ON transactions(branch_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS ix_transactions_status ON transactions(status)")
+        conn.commit()
+
+
+def ensure_sqlite_schema_compatibility():
+    if os.getenv("DATABASE_URL"):
+        return
+    with get_connection() as conn:
+        user_columns = {row["name"] for row in conn.execute("PRAGMA table_info(users)").fetchall()}
+        if "branch_id" not in user_columns:
+            conn.execute("ALTER TABLE users ADD COLUMN branch_id INTEGER")
+
+        transaction_columns = {row["name"] for row in conn.execute("PRAGMA table_info(transactions)").fetchall()}
+        for column_name, column_sql in {
+            "transaction_reference": "TEXT",
+            "status": "TEXT",
+            "idempotency_key": "TEXT",
+            "staff_user_id": "INTEGER",
+            "branch_id": "INTEGER",
+        }.items():
+            if column_name not in transaction_columns:
+                conn.execute(f"ALTER TABLE transactions ADD COLUMN {column_name} {column_sql}")
+
+        branch_columns = {row["name"] for row in conn.execute("PRAGMA table_info(branches)").fetchall()}
+        if not branch_columns:
+            conn.execute(
+                """
+                CREATE TABLE branches (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    branch_code TEXT UNIQUE NOT NULL,
+                    name TEXT NOT NULL,
+                    address TEXT NOT NULL,
+                    city TEXT NOT NULL,
+                    state TEXT NOT NULL,
+                    phone TEXT NOT NULL,
+                    email TEXT,
+                    is_active INTEGER NOT NULL DEFAULT 1,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+        else:
+            for column_name, column_sql in {
+                "branch_code": "TEXT",
+                "name": "TEXT",
+                "address": "TEXT",
+                "city": "TEXT",
+                "state": "TEXT",
+                "phone": "TEXT",
+                "email": "TEXT",
+                "is_active": "INTEGER DEFAULT 1",
+                "created_at": "TEXT DEFAULT CURRENT_TIMESTAMP",
+                "updated_at": "TEXT DEFAULT CURRENT_TIMESTAMP",
+            }.items():
+                if column_name not in branch_columns:
+                    conn.execute(f"ALTER TABLE branches ADD COLUMN {column_name} {column_sql}")
+
+        profile_columns = {row["name"] for row in conn.execute("PRAGMA table_info(staff_profiles)").fetchall()}
+        if not profile_columns:
+            conn.execute(
+                """
+                CREATE TABLE staff_profiles (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL UNIQUE,
+                    staff_role TEXT NOT NULL,
+                    branch_code TEXT,
+                    branch_id INTEGER,
+                    is_active INTEGER NOT NULL DEFAULT 1,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                    FOREIGN KEY (branch_id) REFERENCES branches(id) ON DELETE SET NULL
+                )
+                """
+            )
+        else:
+            for column_name, column_sql in {
+                "user_id": "INTEGER",
+                "staff_role": "TEXT",
+                "branch_code": "TEXT",
+                "branch_id": "INTEGER",
+                "is_active": "INTEGER DEFAULT 1",
+                "created_at": "TEXT DEFAULT CURRENT_TIMESTAMP",
+                "updated_at": "TEXT DEFAULT CURRENT_TIMESTAMP",
+            }.items():
+                if column_name not in profile_columns:
+                    conn.execute(f"ALTER TABLE staff_profiles ADD COLUMN {column_name} {column_sql}")
+
+        conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS uq_branches_branch_code ON branches(branch_code)")
+        conn.execute("CREATE INDEX IF NOT EXISTS ix_staff_profiles_staff_role ON staff_profiles(staff_role)")
+        conn.execute("CREATE INDEX IF NOT EXISTS ix_staff_profiles_branch_code ON staff_profiles(branch_code)")
+        conn.execute("CREATE INDEX IF NOT EXISTS ix_staff_profiles_branch_id ON staff_profiles(branch_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS ix_staff_profiles_is_active ON staff_profiles(is_active)")
+        conn.execute("CREATE INDEX IF NOT EXISTS ix_branches_name ON branches(name)")
+        conn.execute("CREATE INDEX IF NOT EXISTS ix_branches_is_active ON branches(is_active)")
+        conn.execute("CREATE INDEX IF NOT EXISTS ix_users_branch_id ON users(branch_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS ix_transactions_staff_user_id ON transactions(staff_user_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS ix_transactions_branch_id ON transactions(branch_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS ix_transactions_status ON transactions(status)")
         conn.commit()
 
 
@@ -1503,6 +1651,7 @@ if os.getenv("DATABASE_URL"):
     pass
 else:
     init_db()
+    ensure_sqlite_schema_compatibility()
     ensure_user_columns()
     ensure_wallets()
     seed_default_users()
