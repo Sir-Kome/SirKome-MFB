@@ -1046,8 +1046,6 @@ def get_user_by_token(token: str):
 
 
 def get_staff_profile_by_user_id(user_id: int):
-    if not os.getenv("DATABASE_URL"):
-        return None
     with get_connection() as conn:
         return conn.execute(
             "SELECT staff_role, branch_code, branch_id, is_active FROM staff_profiles WHERE user_id = ?",
