@@ -84,11 +84,12 @@ function Transactions() {
                       </div>
                       <div>
                         <p className="break-words font-medium text-slate-800">{item.description}</p>
-                        <p className="text-sm text-slate-500">{item.date}</p>
+                        <p className="text-sm text-slate-500">{item.transaction_reference || 'Legacy transaction'} · {item.date}</p>
                       </div>
                     </div>
-                    <span className={`shrink-0 text-right font-semibold ${item.type === 'credit' ? 'text-emerald-600' : 'text-slate-700'}`}>
-                      {item.type === 'credit' ? '+' : '-'}₦{item.amount.toFixed(2)}
+                    <span className={`shrink-0 text-right font-semibold ${['credit', 'DEPOSIT'].includes(item.type) ? 'text-emerald-600' : 'text-slate-700'}`}>
+                      {['credit', 'DEPOSIT'].includes(item.type) ? '+' : '-'}₦{item.amount.toFixed(2)}
+                      {item.status ? <small className="mt-1 block text-xs font-normal text-slate-400">{item.status}</small> : null}
                     </span>
                   </div>
                 ))}

@@ -8,12 +8,15 @@ import sqlite3
 import time
 import uuid
 from datetime import datetime, timedelta
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 import smtplib
 import urllib.parse
 import urllib.request
 from email.message import EmailMessage
 from collections import defaultdict
+
+from runtime_database import PostgresConnection
 
 from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -37,6 +40,79 @@ DEFAULT_CURRENCY = "NGN"
 VERIFICATION_CODE_TTL_SECONDS = 15 * 60
 VERIFICATION_CACHE: dict[str, dict[str, object]] = {}
 LAST_EMAIL_ERROR = ""
+
+STAFF_ROLES = frozenset({
+    "SUPER_ADMIN",
+    "ADMIN",
+    "BRANCH_MANAGER",
+    "TELLER",
+    "ACCOUNT_OFFICER",
+    "MARKETER",
+})
+ROLE_PERMISSIONS = {
+    "SUPER_ADMIN": frozenset({
+        "lookup_customers",
+        "view_staff",
+        "view_branches",
+        "view_all_customers",
+        "manage_customers",
+        "freeze_accounts",
+        "view_transactions",
+        "manage_operational_banking",
+        "view_reports",
+        "manage_staff",
+        "manage_roles",
+        "manage_branches",
+        "system_configuration",
+    }),
+    "ADMIN": frozenset({
+        "lookup_customers",
+        "view_staff",
+        "view_branches",
+        "view_all_customers",
+        "manage_customers",
+        "freeze_accounts",
+        "view_transactions",
+        "manage_operational_banking",
+        "view_reports",
+        "manage_staff",
+        "manage_branches",
+    }),
+    "BRANCH_MANAGER": frozenset({
+        "view_staff",
+        "view_assigned_branch",
+        "view_teller_transactions",
+        "view_branch_customers",
+        "manage_branch_operations",
+        "view_branch_transactions",
+        "approve_branch_operations",
+        "view_branch_reports",
+        "manage_branch_staff",
+    }),
+    "TELLER": frozenset({
+        "lookup_customers",
+        "create_deposits",
+        "create_withdrawals",
+        "view_permitted_customer_accounts",
+        "process_deposits",
+        "process_withdrawals",
+        "view_teller_transactions",
+    }),
+    "ACCOUNT_OFFICER": frozenset({
+        "manage_permitted_customer_accounts",
+        "view_assigned_customers",
+        "view_account_information",
+    }),
+    "MARKETER": frozenset({
+        "view_permitted_customer_profiles",
+        "access_marketing_functions",
+    }),
+}
+ROLE_MANAGEABLE_ROLES = {
+    "SUPER_ADMIN": STAFF_ROLES,
+    "ADMIN": frozenset(STAFF_ROLES - {"SUPER_ADMIN"}),
+    "BRANCH_MANAGER": frozenset({"TELLER", "ACCOUNT_OFFICER", "MARKETER"}),
+}
 
 
 def load_env_file():
@@ -75,6 +151,55 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class StaffLoginRequest(BaseModel):
+    email: str
+    password: str
+
+
+class StaffCreateRequest(BaseModel):
+    name: str
+    email: str
+    phone: str
+    password: str
+    pin: str
+    role: str
+    branch_id: int | None = None
+
+
+class StaffUpdateRequest(BaseModel):
+    name: str | None = None
+    phone: str | None = None
+    role: str | None = None
+    branch_id: int | None = None
+
+
+class StaffStatusRequest(BaseModel):
+    is_active: bool
+
+
+class BranchCreateRequest(BaseModel):
+    branch_code: str
+    name: str
+    address: str
+    city: str
+    state: str
+    phone: str
+    email: str | None = None
+
+
+class BranchUpdateRequest(BaseModel):
+    name: str | None = None
+    address: str | None = None
+    city: str | None = None
+    state: str | None = None
+    phone: str | None = None
+    email: str | None = None
+
+
+class BranchStatusRequest(BaseModel):
+    is_active: bool
+
+
 class RegisterRequest(BaseModel):
     first_name: str | None = None
     last_name: str | None = None
@@ -103,9 +228,32 @@ class TransferRequest(BaseModel):
 class FreezeUserRequest(BaseModel):
     is_frozen: bool
     reason: str | None = None
+    model_config = {"extra": "forbid"}
+
+
+class CustomerUpdateRequest(BaseModel):
+    name: str | None = None
+    phone: str | None = None
+    email: str | None = None
+    address: str | None = None
+    date_of_birth: str | None = None
+    gender: str | None = None
+    model_config = {"extra": "forbid"}
+
+
+class CustomerStatusRequest(BaseModel):
+    is_frozen: bool
+    reason: str | None = None
+    model_config = {"extra": "forbid"}
+
+
+class CustomerBranchRequest(BaseModel):
+    branch_id: int
+    model_config = {"extra": "forbid"}
 
 
 class UserProfile(BaseModel):
+    user_id: str
     name: str
     email: str
     phone: str
@@ -115,6 +263,9 @@ class UserProfile(BaseModel):
     balance: float
     currency: str = DEFAULT_CURRENCY
     is_admin: bool = False
+    user_type: str = "CUSTOMER"
+    role: str | None = None
+    permissions: list[str] = []
     is_frozen: bool = False
     freeze_reason: str | None = None
     tier: str = "Tier 1"
@@ -135,6 +286,8 @@ class TransactionResponse(BaseModel):
     amount: float
     description: str
     date: str
+    transaction_reference: str | None = None
+    status: str | None = None
 
 
 class TransactionPageResponse(BaseModel):
@@ -163,6 +316,35 @@ class TransferResponse(BaseModel):
     amount: float | None = None
     description: str | None = None
     date: str | None = None
+
+
+class TellerOperationRequest(BaseModel):
+    account_number: str
+    amount: Decimal
+    description: str = ""
+    idempotency_key: str | None = None
+
+
+class TellerCustomerResponse(BaseModel):
+    user_id: str
+    name: str
+    account_number: str
+    wallet_id: str | None = None
+    balance: float
+    currency: str
+    is_frozen: bool
+    branch_id: int | None = None
+
+
+class TellerTransactionResponse(BaseModel):
+    transaction_reference: str | None = None
+    type: str
+    amount: float
+    status: str | None = None
+    account_number: str
+    description: str
+    date: str
+    branch_id: int | None = None
 
 
 class ProfileUpdateRequest(BaseModel):
@@ -214,12 +396,16 @@ class NotificationPageResponse(BaseModel):
 
 
 def get_connection():
+    if os.getenv("DATABASE_URL"):
+        return PostgresConnection()
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
 
 
 def init_db():
+    if os.getenv("DATABASE_URL"):
+        return
     with get_connection() as conn:
         users_columns = {row["name"] for row in conn.execute("PRAGMA table_info(users)").fetchall()}
         if users_columns and ("user_id" in users_columns or "wallet_id" in users_columns or "pin_hash" not in users_columns):
@@ -392,6 +578,8 @@ def create_or_update_wallet(conn: sqlite3.Connection, user_ref: int | str, accou
 
 
 def ensure_user_columns():
+    if os.getenv("DATABASE_URL"):
+        return
     with get_connection() as conn:
         columns = {row["name"] for row in conn.execute("PRAGMA table_info(users)").fetchall()}
         if "nin" not in columns:
@@ -495,6 +683,8 @@ def ensure_user_columns():
 
 
 def ensure_wallets():
+    if os.getenv("DATABASE_URL"):
+        return
     with get_connection() as conn:
         users = conn.execute("SELECT id, user_id, account_number FROM users").fetchall()
         for user in users:
@@ -707,22 +897,413 @@ def get_user_by_token(token: str):
         return conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
 
 
+def get_staff_profile_by_user_id(user_id: int):
+    if not os.getenv("DATABASE_URL"):
+        return None
+    with get_connection() as conn:
+        return conn.execute(
+            "SELECT staff_role, branch_code, branch_id, is_active FROM staff_profiles WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()
+
+
+def get_staff_context(user):
+    profile = get_staff_profile_by_user_id(user["id"])
+    if profile:
+        if not bool(profile["is_active"]):
+            return None
+        role = profile["staff_role"]
+        return {
+            "role": role,
+            "branch_code": profile["branch_code"],
+            "branch_id": profile["branch_id"],
+            "permissions": sorted(ROLE_PERMISSIONS.get(role, ())),
+        }
+
+    if bool(user["is_admin"]):
+        return {
+            "role": "SUPER_ADMIN",
+            "branch_code": None,
+            "branch_id": None,
+            "permissions": sorted(ROLE_PERMISSIONS["SUPER_ADMIN"]),
+        }
+
+    return None
+
+
 def get_wallet_by_account(account_number: str):
     normalized_account = resolve_account_number(account_number)
     with get_connection() as conn:
         return conn.execute("SELECT * FROM wallets WHERE account_number = ?", (normalized_account,)).fetchone()
 
 
-def require_authenticated_admin(credentials: HTTPAuthorizationCredentials | None) -> sqlite3.Row:
+def get_current_user(credentials: HTTPAuthorizationCredentials | None):
     if not credentials:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
 
     current_user = get_user_by_token(credentials.credentials)
     if not current_user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+    return current_user
 
-    if current_user["is_admin"] != 1:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
+
+def require_staff(credentials: HTTPAuthorizationCredentials | None):
+    current_user = get_current_user(credentials)
+    if not get_staff_context(current_user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Staff access required")
+    return current_user
+
+
+def require_role(credentials: HTTPAuthorizationCredentials | None, *roles: str):
+    current_user = require_staff(credentials)
+    staff_context = get_staff_context(current_user)
+    if staff_context["role"] not in roles:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient staff role")
+    return current_user
+
+
+def require_permission(credentials: HTTPAuthorizationCredentials | None, permission: str):
+    current_user = require_staff(credentials)
+    staff_context = get_staff_context(current_user)
+    if permission not in staff_context["permissions"]:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient staff permission")
+    return current_user
+
+
+def staff_role(user) -> str:
+    context = get_staff_context(user)
+    return context["role"] if context else ""
+
+
+def require_staff_management(credentials: HTTPAuthorizationCredentials | None):
+    current_user = require_staff(credentials)
+    context = get_staff_context(current_user)
+    if "manage_staff" not in context["permissions"] and "manage_branch_staff" not in context["permissions"]:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Staff management access required")
+    return current_user
+
+
+def require_branch_management(credentials: HTTPAuthorizationCredentials | None):
+    current_user = require_staff(credentials)
+    context = get_staff_context(current_user)
+    if "manage_branches" not in context["permissions"] and "view_assigned_branch" not in context["permissions"]:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Branch management access required")
+    return current_user
+
+
+def normalize_staff_role(value: str) -> str:
+    role = (value or "").strip().upper()
+    if role not in STAFF_ROLES:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid staff role")
+    return role
+
+
+def validate_staff_role_assignment(current_user, requested_role: str):
+    role = normalize_staff_role(requested_role)
+    current_role = staff_role(current_user)
+    if role not in ROLE_MANAGEABLE_ROLES.get(current_role, frozenset()):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You are not permitted to assign this staff role")
+    return role
+
+
+def get_branch_by_id(branch_id: int):
+    with get_connection() as conn:
+        return conn.execute("SELECT * FROM branches WHERE id = ?", (branch_id,)).fetchone()
+
+
+def get_staff_record(staff_identifier: str):
+    normalized = staff_identifier.strip()
+    with get_connection() as conn:
+        return conn.execute(
+            """
+            SELECT
+                u.id AS user_id,
+                u.user_id AS public_user_id,
+                u.name,
+                u.email,
+                u.phone,
+                sp.id AS staff_profile_id,
+                sp.staff_role,
+                sp.branch_id,
+                sp.is_active,
+                sp.created_at,
+                sp.updated_at,
+                b.branch_code,
+                b.name AS branch_name
+            FROM users AS u
+            JOIN staff_profiles AS sp ON sp.user_id = u.id
+            LEFT JOIN branches AS b ON b.id = sp.branch_id
+            WHERE u.user_id = ? OR u.email = ? OR CAST(u.id AS TEXT) = ?
+            """,
+            (normalized, normalize_email(normalized), normalized),
+        ).fetchone()
+
+
+def staff_record_in_scope(current_user, staff_record) -> bool:
+    context = get_staff_context(current_user)
+    if not context:
+        return False
+    if context["role"] in {"SUPER_ADMIN", "ADMIN"}:
+        return True
+    return context["branch_id"] is not None and staff_record["branch_id"] == context["branch_id"]
+
+
+def can_manage_staff_record(current_user, staff_record) -> bool:
+    context = get_staff_context(current_user)
+    if not context or not staff_record_in_scope(current_user, staff_record):
+        return False
+    if staff_record["staff_role"] == "SUPER_ADMIN" and context["role"] != "SUPER_ADMIN":
+        return False
+    return staff_record["staff_role"] in ROLE_MANAGEABLE_ROLES.get(context["role"], frozenset())
+
+
+def branch_in_scope(current_user, branch_id: int) -> bool:
+    context = get_staff_context(current_user)
+    if not context:
+        return False
+    if context["role"] in {"SUPER_ADMIN", "ADMIN"}:
+        return True
+    return context["branch_id"] == branch_id
+
+
+def format_timestamp(value) -> str | None:
+    return value.isoformat() if hasattr(value, "isoformat") else str(value) if value else None
+
+
+def customer_status_label(user_row) -> str:
+    return "FROZEN" if bool(user_row["is_frozen"]) else "ACTIVE"
+
+
+def customer_accessible_branch(context):
+    if context["role"] in {"SUPER_ADMIN", "ADMIN"}:
+        return None
+    if context["branch_id"] is None:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Branch access required")
+    return context["branch_id"]
+
+
+def customer_in_scope(current_user, customer_row) -> bool:
+    context = get_staff_context(current_user)
+    if not context:
+        return False
+    if context["role"] in {"SUPER_ADMIN", "ADMIN"}:
+        return True
+    if context["branch_id"] is None:
+        return False
+    return customer_row["branch_id"] == context["branch_id"]
+
+
+def serialize_customer_summary(row):
+    branch = None
+    if row["branch_id"] is not None:
+        branch = {
+            "id": row["branch_id"],
+            "code": row["branch_code"],
+            "name": row["branch_name"],
+        }
+    wallet = None
+    if row["wallet_balance"] is not None:
+        wallet = {
+            "account_number": row["account_number"],
+            "balance": float(row["wallet_balance"] or 0.0),
+            "currency": row["currency"],
+            "status": row["wallet_status"] or "active",
+        }
+    return {
+        "id": row["id"],
+        "user_id": row["user_id"],
+        "name": row["name"],
+        "email": row["email"],
+        "phone": row["phone"],
+        "account_number": row["account_number"],
+        "status": customer_status_label(row),
+        "is_frozen": bool(row["is_frozen"]),
+        "freeze_reason": row["freeze_reason"] or None,
+        "branch": branch,
+        "wallet": wallet,
+        "branch_id": row["branch_id"],
+    }
+
+
+def serialize_customer_detail(row):
+    summary = serialize_customer_summary(row)
+    recent_transactions = []
+    if row.get("recent_transactions"):
+        recent_transactions = row["recent_transactions"]
+    detail = {**summary, "address": row["address"], "date_of_birth": row["date_of_birth"], "gender": row["gender"], "currency": row["currency"], "user_type": "CUSTOMER", "recent_transactions": recent_transactions}
+    detail.pop("wallet", None)
+    detail["wallet"] = {
+        "account_number": row["account_number"],
+        "balance": float(row["wallet_balance"] or 0.0),
+        "currency": row["currency"],
+        "status": row["wallet_status"] or "active",
+    } if row["wallet_balance"] is not None else None
+    return detail
+
+
+def serialize_branch(row):
+    return {
+        "id": row["id"],
+        "branch_code": row["branch_code"],
+        "name": row["name"],
+        "address": row["address"],
+        "city": row["city"],
+        "state": row["state"],
+        "phone": row["phone"],
+        "email": row["email"],
+        "is_active": bool(row["is_active"]),
+        "created_at": format_timestamp(row["created_at"]),
+        "updated_at": format_timestamp(row["updated_at"]),
+    }
+
+
+def serialize_staff(row):
+    branch = None
+    if row["branch_id"] is not None:
+        branch = {
+            "id": row["branch_id"],
+            "code": row["branch_code"],
+            "name": row["branch_name"],
+        }
+    return {
+        "id": row["public_user_id"],
+        "name": row["name"],
+        "email": row["email"],
+        "phone": row["phone"],
+        "role": row["staff_role"],
+        "branch": branch,
+        "is_active": bool(row["is_active"]),
+        "created_at": format_timestamp(row["created_at"]),
+        "updated_at": format_timestamp(row["updated_at"]),
+    }
+
+
+def teller_scope_clause(context):
+    if context["role"] in {"SUPER_ADMIN", "ADMIN"}:
+        return "", ()
+    if context["branch_id"] is None:
+        return " AND u.branch_id IS NULL AND 1 = 0", ()
+    return " AND u.branch_id = ?", (context["branch_id"],)
+
+
+def get_teller_customer(conn, account_number: str, context):
+    scope_clause, scope_params = teller_scope_clause(context)
+    return conn.execute(
+        f"""
+        SELECT u.id, u.user_id, u.name, u.account_number, u.wallet_id, u.currency,
+               u.is_frozen, u.freeze_reason, u.branch_id,
+               w.wallet_balance, w.status AS wallet_status,
+               b.is_active AS branch_active
+        FROM users AS u
+        LEFT JOIN wallets AS w ON w.account_number = u.account_number
+        LEFT JOIN branches AS b ON b.id = u.branch_id
+        WHERE u.account_number = ?{scope_clause}
+        """,
+        (resolve_account_number(account_number), *scope_params),
+    ).fetchone()
+
+
+def serialize_teller_customer(row):
+    return {
+        "user_id": row["user_id"],
+        "name": row["name"],
+        "account_number": row["account_number"],
+        "wallet_id": row["wallet_id"],
+        "balance": float(row["wallet_balance"] or 0),
+        "currency": row["currency"],
+        "is_frozen": bool(row["is_frozen"]),
+        "branch_id": row["branch_id"],
+    }
+
+
+def serialize_teller_transaction(row):
+    return {
+        "transaction_reference": row["transaction_reference"],
+        "type": row["type"],
+        "amount": float(row["amount"]),
+        "status": row["status"],
+        "account_number": row["account_number"],
+        "description": row["description"],
+        "date": row["date"],
+        "branch_id": row["branch_id"],
+    }
+
+
+def validate_teller_amount(amount: Decimal) -> Decimal:
+    try:
+        value = Decimal(amount).quantize(Decimal("0.01"))
+    except (InvalidOperation, TypeError, ValueError) as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Amount must be a valid number") from exc
+    if value <= Decimal("0.00"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Amount must be greater than zero")
+    return value
+
+
+def require_teller_operation(credentials: HTTPAuthorizationCredentials | None, permission: str):
+    current_user = require_permission(credentials, permission)
+    if staff_role(current_user) != "TELLER":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Teller access required")
+    return current_user
+
+
+def process_teller_operation(payload: TellerOperationRequest, current_user, transaction_type: str):
+    amount = validate_teller_amount(payload.amount)
+    idempotency_key = (payload.idempotency_key or "").strip() or None
+    description = (payload.description or "").strip() or transaction_type.title()
+    context = get_staff_context(current_user)
+    transaction_reference = f"TLL-{uuid.uuid4().hex[:16].upper()}"
+
+    with get_connection() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        if idempotency_key:
+            existing = conn.execute(
+                "SELECT * FROM transactions WHERE idempotency_key = ?",
+                (idempotency_key,),
+            ).fetchone()
+            if existing:
+                if existing["account_number"] != resolve_account_number(payload.account_number) or Decimal(existing["amount"]) != amount or existing["type"] != transaction_type:
+                    raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Idempotency key was already used for another transaction")
+                return serialize_teller_transaction(existing)
+
+        customer = get_teller_customer(conn, payload.account_number, context)
+        if not customer:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Customer account not found")
+        if bool(customer["is_frozen"]):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Frozen accounts cannot be used for teller operations")
+        if customer["wallet_status"] != "active" or customer["branch_active"] is False:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Customer account is inactive")
+
+        if transaction_type == "WITHDRAWAL":
+            updated_wallet = conn.execute(
+                "UPDATE wallets SET wallet_balance = wallet_balance - ? WHERE account_number = ? AND wallet_balance >= ? RETURNING wallet_balance",
+                (amount, customer["account_number"], amount),
+            ).fetchone()
+            if not updated_wallet:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Insufficient funds")
+        else:
+            updated_wallet = conn.execute(
+                "UPDATE wallets SET wallet_balance = wallet_balance + ? WHERE account_number = ? RETURNING wallet_balance",
+                (amount, customer["account_number"]),
+            ).fetchone()
+
+        transaction = conn.execute(
+            """
+            INSERT INTO transactions
+                (account_number, type, amount, description, date, related_account,
+                 transaction_reference, status, idempotency_key, staff_user_id, branch_id)
+            VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, NULL, ?, 'COMPLETED', ?, ?, ?)
+            RETURNING transaction_reference, type, amount, status, account_number,
+                      description, date, branch_id
+            """,
+            (customer["account_number"], transaction_type, amount, description, transaction_reference, idempotency_key, current_user["id"], context["branch_id"]),
+        ).fetchone()
+        conn.commit()
+
+    return serialize_teller_transaction(transaction)
+
+
+def require_authenticated_admin(credentials: HTTPAuthorizationCredentials | None):
+    current_user = require_permission(credentials, "manage_customers")
 
     return current_user
 
@@ -800,17 +1381,22 @@ def notify_user_by_email(to_address: str, subject: str, body: str) -> bool:
 def create_user_record(name: str, email: str, password: str, phone: str, nin: str | None, bvn: str | None, pin: str, is_admin: int = 0, balance: float = 0.0, account_number: str | None = None, token: str | None = None, is_frozen: int = 0, freeze_reason: str = "", verification_tier: int | None = None, date_of_birth: str = "", gender: str = ""):
     account_number = account_number or generate_account_number()
     resolved_verification_tier = verification_tier if verification_tier is not None else (2 if nin and bvn else 1)
+    is_admin_value = bool(is_admin)
+    is_frozen_value = bool(is_frozen)
     with get_connection() as conn:
         user_id_val = f"USR-{uuid.uuid4().hex[:12].upper()}"
-        cursor = conn.execute(
-            """
+        insert_sql = """
             INSERT INTO users (user_id, name, email, password, phone, date_of_birth, gender, account_number, currency, is_admin, token, nin, bvn, pin_hash, wallet_id, is_frozen, freeze_reason, verification_tier)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (user_id_val, name, email, hash_password(password), phone, date_of_birth, gender, account_number, DEFAULT_CURRENCY, is_admin, None, nin, bvn, hash_pin(pin), user_id_val, is_frozen, freeze_reason, resolved_verification_tier),
+        """
+        if os.getenv("DATABASE_URL"):
+            insert_sql += " RETURNING id"
+        cursor = conn.execute(
+            insert_sql,
+            (user_id_val, name, email, hash_password(password), phone, date_of_birth, gender, account_number, DEFAULT_CURRENCY, is_admin_value, None, nin, bvn, hash_pin(pin), user_id_val, is_frozen_value, freeze_reason, resolved_verification_tier),
         )
         conn.commit()
-        user_id = cursor.lastrowid
+        user_id = cursor.fetchone()[0] if os.getenv("DATABASE_URL") else cursor.lastrowid
         wallet_id = create_or_update_wallet(conn, user_id_val, account_number, float(balance), wallet_id=user_id_val)
         conn.execute("UPDATE users SET wallet_id = ? WHERE id = ?", (wallet_id, user_id))
         conn.commit()
@@ -911,10 +1497,15 @@ def resolve_admin_user(conn: sqlite3.Connection, user_identifier: str):
     ).fetchone()
 
 
-init_db()
-ensure_user_columns()
-ensure_wallets()
-seed_default_users()
+if os.getenv("DATABASE_URL"):
+    # PostgreSQL schema/data are provisioned by Alembic and the reviewed import.
+    # Runtime startup must never create, reset, or seed the migrated database.
+    pass
+else:
+    init_db()
+    ensure_user_columns()
+    ensure_wallets()
+    seed_default_users()
 
 
 @app.get("/")
@@ -926,6 +1517,7 @@ def build_user_profile(user):
     wallet = get_wallet_by_account(user["account_number"])
     tier = int(user["verification_tier"] or 1) if "verification_tier" in user.keys() else 1
     tier_limits = {1: 50000.0, 2: 100000.0, 3: 500000.0}
+    staff_context = get_staff_context(user)
     return {
         "user_id": user["user_id"],
         "name": user["name"],
@@ -937,6 +1529,9 @@ def build_user_profile(user):
         "balance": float(wallet["wallet_balance"] if wallet else 0.0),
         "currency": DEFAULT_CURRENCY,
         "is_admin": bool(user["is_admin"]),
+        "user_type": "STAFF" if staff_context else "CUSTOMER",
+        "role": staff_context["role"] if staff_context else None,
+        "permissions": staff_context["permissions"] if staff_context else [],
         "is_frozen": bool(user["is_frozen"] if "is_frozen" in user.keys() else 0),
         "freeze_reason": user["freeze_reason"] if "freeze_reason" in user.keys() and user["freeze_reason"] else None,
         "tier": f"Tier {tier}",
@@ -953,18 +1548,371 @@ def build_auth_response(user, token: str):
     }
 
 
-@app.post("/auth/login", response_model=LoginResponse)
-def login(payload: LoginRequest):
-    user = get_user_by_email(payload.email)
-    if not user or user["password"] != hash_password(payload.password):
+def authenticate_login_user(email: str, password: str):
+    user = get_user_by_email(email)
+    if not user or user["password"] != hash_password(password):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+
+    staff_profile = get_staff_profile_by_user_id(user["id"])
+    if staff_profile and not bool(staff_profile["is_active"]):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="This staff account is inactive")
 
     if user["is_frozen"] if "is_frozen" in user.keys() else 0:
         reason = user["freeze_reason"] if "freeze_reason" in user.keys() and user["freeze_reason"] else "No reason provided"
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"Your account has been frozen. Reason: {reason}")
 
+    return user
+
+
+@app.post("/auth/login", response_model=LoginResponse)
+def login(payload: LoginRequest):
+    user = authenticate_login_user(payload.email, payload.password)
     token = create_access_token(user["id"])
     return build_auth_response(user, token)
+
+
+@app.post("/staff/login", response_model=LoginResponse)
+def staff_login(payload: StaffLoginRequest):
+    user = authenticate_login_user(payload.email, payload.password)
+    if not get_staff_context(user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Staff access required")
+
+    token = create_access_token(user["id"])
+    return build_auth_response(user, token)
+
+
+@app.get("/staff/me")
+def staff_me(credentials: HTTPAuthorizationCredentials | None = Depends(security)):
+    user = require_staff(credentials)
+    staff_context = get_staff_context(user)
+    return {
+        "user": build_user_profile(user),
+        "role": staff_context["role"],
+        "branch_code": staff_context["branch_code"],
+        "permissions": staff_context["permissions"],
+    }
+
+
+@app.get("/staff")
+def list_staff(credentials: HTTPAuthorizationCredentials | None = Depends(security)):
+    current_user = require_staff(credentials)
+    context = get_staff_context(current_user)
+    if context["role"] not in {"SUPER_ADMIN", "ADMIN", "BRANCH_MANAGER"}:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Staff listing access required")
+
+    with get_connection() as conn:
+        if context["role"] == "BRANCH_MANAGER":
+            if context["branch_id"] is None:
+                return []
+            rows = conn.execute(
+                """
+                SELECT u.user_id AS public_user_id, u.name, u.email, u.phone,
+                       sp.staff_role, sp.branch_id, sp.is_active, sp.created_at,
+                       sp.updated_at, b.branch_code, b.name AS branch_name
+                FROM users AS u
+                JOIN staff_profiles AS sp ON sp.user_id = u.id
+                LEFT JOIN branches AS b ON b.id = sp.branch_id
+                WHERE sp.branch_id = ?
+                ORDER BY u.name ASC
+                """,
+                (context["branch_id"],),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """
+                SELECT u.user_id AS public_user_id, u.name, u.email, u.phone,
+                       sp.staff_role, sp.branch_id, sp.is_active, sp.created_at,
+                       sp.updated_at, b.branch_code, b.name AS branch_name
+                FROM users AS u
+                JOIN staff_profiles AS sp ON sp.user_id = u.id
+                LEFT JOIN branches AS b ON b.id = sp.branch_id
+                ORDER BY u.name ASC
+                """
+            ).fetchall()
+    return [serialize_staff(row) for row in rows]
+
+
+@app.get("/staff/{staff_id}")
+def get_staff(staff_id: str, credentials: HTTPAuthorizationCredentials | None = Depends(security)):
+    current_user = require_staff(credentials)
+    record = get_staff_record(staff_id)
+    if not record or not staff_record_in_scope(current_user, record):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Staff member not found")
+    return serialize_staff(record)
+
+
+@app.post("/staff")
+def create_staff(payload: StaffCreateRequest, credentials: HTTPAuthorizationCredentials | None = Depends(security)):
+    current_user = require_staff_management(credentials)
+    context = get_staff_context(current_user)
+    role = validate_staff_role_assignment(current_user, payload.role)
+    if not payload.name.strip():
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Staff name is required")
+    name = validate_full_name(payload.name, None, None)
+    email = validate_email_address(payload.email)
+    phone = validate_phone_number(payload.phone)
+    password = validate_password(payload.password)
+    pin = validate_pin(payload.pin)
+
+    with get_connection() as conn:
+        duplicate = conn.execute(
+            "SELECT id FROM users WHERE LOWER(email) = ? OR phone = ?",
+            (email, phone),
+        ).fetchone()
+    if duplicate:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="A user with this email or phone already exists")
+
+    branch_id = payload.branch_id
+    if context["role"] == "BRANCH_MANAGER":
+        if branch_id != context["branch_id"]:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Branch managers may assign staff only to their own branch")
+    if branch_id is not None:
+        branch = get_branch_by_id(branch_id)
+        if not branch or not bool(branch["is_active"]):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Active branch not found")
+
+    user = create_user_record(
+        name=name,
+        email=email,
+        password=password,
+        phone=phone,
+        nin=None,
+        bvn=None,
+        pin=pin,
+        is_admin=False,
+    )
+    with get_connection() as conn:
+        conn.execute(
+            "INSERT INTO staff_profiles (user_id, staff_role, branch_id, is_active, created_at, updated_at) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+            (user["id"], role, branch_id, True),
+        )
+        conn.commit()
+    return serialize_staff(get_staff_record(user["user_id"]))
+
+
+@app.patch("/staff/{staff_id}/status")
+def update_staff_status(staff_id: str, payload: StaffStatusRequest, credentials: HTTPAuthorizationCredentials | None = Depends(security)):
+    current_user = require_staff_management(credentials)
+    target = get_staff_record(staff_id)
+    if not target or not can_manage_staff_record(current_user, target):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Staff member not found")
+    if target["user_id"] == current_user["id"]:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You cannot deactivate your own staff account")
+    with get_connection() as conn:
+        conn.execute(
+            "UPDATE staff_profiles SET is_active = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (bool(payload.is_active), target["staff_profile_id"]),
+        )
+        conn.commit()
+    return serialize_staff(get_staff_record(staff_id))
+
+
+@app.patch("/staff/{staff_id}")
+def update_staff(staff_id: str, payload: StaffUpdateRequest, credentials: HTTPAuthorizationCredentials | None = Depends(security)):
+    current_user = require_staff_management(credentials)
+    target = get_staff_record(staff_id)
+    if not target or not can_manage_staff_record(current_user, target):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Staff member not found")
+
+    context = get_staff_context(current_user)
+    updates = []
+    params = []
+    if payload.name is not None:
+        updates.append("name = ?")
+        params.append(validate_full_name(payload.name, None, None))
+    if payload.phone is not None:
+        phone = validate_phone_number(payload.phone)
+        with get_connection() as conn:
+            duplicate = conn.execute("SELECT id FROM users WHERE phone = ? AND id <> ?", (phone, target["user_id"])).fetchone()
+        if duplicate:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="A user with this phone already exists")
+        updates.append("phone = ?")
+        params.append(phone)
+
+    role = target["staff_role"]
+    if payload.role is not None:
+        if target["user_id"] == current_user["id"]:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You cannot change your own staff role")
+        role = validate_staff_role_assignment(current_user, payload.role)
+
+    branch_id = target["branch_id"]
+    if payload.branch_id is not None:
+        if context["role"] == "BRANCH_MANAGER" and payload.branch_id != context["branch_id"]:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Branch managers may assign staff only to their own branch")
+        branch = get_branch_by_id(payload.branch_id)
+        if not branch or not bool(branch["is_active"]):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Active branch not found")
+        branch_id = payload.branch_id
+
+    if role != target["staff_role"] or branch_id != target["branch_id"]:
+        with get_connection() as conn:
+            conn.execute(
+                "UPDATE staff_profiles SET staff_role = ?, branch_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (role, branch_id, target["staff_profile_id"]),
+            )
+            conn.commit()
+    if updates:
+        params.append(target["user_id"])
+        with get_connection() as conn:
+            conn.execute(f"UPDATE users SET {', '.join(updates)} WHERE id = ?", tuple(params))
+            conn.commit()
+    return serialize_staff(get_staff_record(staff_id))
+
+
+@app.get("/branches")
+def list_branches(credentials: HTTPAuthorizationCredentials | None = Depends(security)):
+    current_user = require_branch_management(credentials)
+    context = get_staff_context(current_user)
+    with get_connection() as conn:
+        if context["role"] == "BRANCH_MANAGER":
+            if context["branch_id"] is None:
+                return []
+            rows = conn.execute("SELECT * FROM branches WHERE id = ?", (context["branch_id"],)).fetchall()
+        else:
+            rows = conn.execute("SELECT * FROM branches ORDER BY name ASC").fetchall()
+    return [serialize_branch(row) for row in rows]
+
+
+@app.get("/branches/{branch_id}")
+def get_branch(branch_id: int, credentials: HTTPAuthorizationCredentials | None = Depends(security)):
+    current_user = require_branch_management(credentials)
+    branch = get_branch_by_id(branch_id)
+    if not branch or not branch_in_scope(current_user, branch_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Branch not found")
+    return serialize_branch(branch)
+
+
+@app.get("/teller/customers", response_model=list[TellerCustomerResponse])
+def lookup_teller_customers(query: str, credentials: HTTPAuthorizationCredentials | None = Depends(security)):
+    current_user = require_permission(credentials, "lookup_customers")
+    context = get_staff_context(current_user)
+    normalized_query = query.strip()
+    if len(normalized_query) < 2:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Search query must contain at least two characters")
+    scope_clause, scope_params = teller_scope_clause(context)
+    with get_connection() as conn:
+        rows = conn.execute(
+            f"""
+            SELECT u.id, u.user_id, u.name, u.account_number, u.wallet_id, u.currency,
+                   u.is_frozen, u.branch_id, w.wallet_balance
+            FROM users AS u
+            LEFT JOIN wallets AS w ON w.account_number = u.account_number
+            WHERE (u.account_number = ? OR LOWER(u.name) LIKE ? OR u.phone = ?){scope_clause}
+            ORDER BY u.name ASC
+            LIMIT 20
+            """,
+            (resolve_account_number(normalized_query), f"%{normalized_query.lower()}%", normalized_query, *scope_params),
+        ).fetchall()
+    return [serialize_teller_customer(row) for row in rows]
+
+
+@app.post("/teller/deposits", response_model=TellerTransactionResponse)
+def create_teller_deposit(payload: TellerOperationRequest, credentials: HTTPAuthorizationCredentials | None = Depends(security)):
+    current_user = require_teller_operation(credentials, "create_deposits")
+    return process_teller_operation(payload, current_user, "DEPOSIT")
+
+
+@app.post("/teller/withdrawals", response_model=TellerTransactionResponse)
+def create_teller_withdrawal(payload: TellerOperationRequest, credentials: HTTPAuthorizationCredentials | None = Depends(security)):
+    current_user = require_teller_operation(credentials, "create_withdrawals")
+    return process_teller_operation(payload, current_user, "WITHDRAWAL")
+
+
+@app.get("/teller/transactions", response_model=list[TellerTransactionResponse])
+def list_teller_transactions(credentials: HTTPAuthorizationCredentials | None = Depends(security), account_number: str | None = None, transaction_type: str | None = None, transaction_reference: str | None = None, limit: int = 50):
+    current_user = require_staff(credentials)
+    context = get_staff_context(current_user)
+    if "view_teller_transactions" not in context["permissions"] and "view_branch_transactions" not in context["permissions"]:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Teller transaction access required")
+    conditions = ["t.status = 'COMPLETED'"]
+    params = []
+    if context["role"] not in {"SUPER_ADMIN", "ADMIN"}:
+        if context["branch_id"] is None:
+            return []
+        conditions.append("t.branch_id = ?")
+        params.append(context["branch_id"])
+    if account_number:
+        conditions.append("t.account_number = ?")
+        params.append(resolve_account_number(account_number))
+    if transaction_type:
+        conditions.append("t.type = ?")
+        params.append(transaction_type.strip().upper())
+    if transaction_reference:
+        conditions.append("t.transaction_reference = ?")
+        params.append(transaction_reference.strip())
+    limit = max(1, min(limit, 100))
+    params.append(limit)
+    with get_connection() as conn:
+        rows = conn.execute(
+            f"SELECT transaction_reference, type, amount, status, account_number, description, date, branch_id FROM transactions AS t WHERE {' AND '.join(conditions)} ORDER BY t.id DESC LIMIT ?",
+            tuple(params),
+        ).fetchall()
+    return [serialize_teller_transaction(row) for row in rows]
+
+
+def validate_branch_payload(payload, partial: bool = False):
+    values = {}
+    for field in ("branch_code", "name", "address", "city", "state", "phone"):
+        value = getattr(payload, field, None)
+        if value is None and partial:
+            continue
+        value = (value or "").strip()
+        if not value:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"{field.replace('_', ' ').title()} is required")
+        if len(value) > 255:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"{field.replace('_', ' ').title()} is too long")
+        values[field] = value
+    if "branch_code" in values:
+        values["branch_code"] = values["branch_code"].upper()
+        if not re.fullmatch(r"[A-Z0-9][A-Z0-9_-]{1,63}", values["branch_code"]):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Branch code must use 2-64 letters, numbers, hyphens, or underscores")
+    if getattr(payload, "email", None) is not None:
+        values["email"] = validate_email_address(payload.email) if payload.email.strip() else None
+    return values
+
+
+@app.post("/branches")
+def create_branch(payload: BranchCreateRequest, credentials: HTTPAuthorizationCredentials | None = Depends(security)):
+    require_permission(credentials, "manage_branches")
+    values = validate_branch_payload(payload)
+    with get_connection() as conn:
+        if conn.execute("SELECT id FROM branches WHERE branch_code = ?", (values["branch_code"],)).fetchone():
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Branch code already exists")
+        insert_sql = "INSERT INTO branches (branch_code, name, address, city, state, phone, email, is_active, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+        if os.getenv("DATABASE_URL"):
+            insert_sql += " RETURNING id"
+        cursor = conn.execute(insert_sql, (values["branch_code"], values["name"], values["address"], values["city"], values["state"], values["phone"], values.get("email"), True))
+        conn.commit()
+        branch_id = cursor.fetchone()[0] if os.getenv("DATABASE_URL") else cursor.lastrowid
+    return serialize_branch(get_branch_by_id(branch_id))
+
+
+@app.patch("/branches/{branch_id}/status")
+def update_branch_status(branch_id: int, payload: BranchStatusRequest, credentials: HTTPAuthorizationCredentials | None = Depends(security)):
+    require_permission(credentials, "manage_branches")
+    branch = get_branch_by_id(branch_id)
+    if not branch:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Branch not found")
+    with get_connection() as conn:
+        conn.execute("UPDATE branches SET is_active = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (bool(payload.is_active), branch_id))
+        conn.commit()
+    return serialize_branch(get_branch_by_id(branch_id))
+
+
+@app.patch("/branches/{branch_id}")
+def update_branch(branch_id: int, payload: BranchUpdateRequest, credentials: HTTPAuthorizationCredentials | None = Depends(security)):
+    require_permission(credentials, "manage_branches")
+    if not get_branch_by_id(branch_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Branch not found")
+    values = validate_branch_payload(payload, partial=True)
+    if not values:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No branch fields to update")
+    updates = [f"{field} = ?" for field in values]
+    params = list(values.values()) + [branch_id]
+    with get_connection() as conn:
+        conn.execute(f"UPDATE branches SET {', '.join(updates)}, updated_at = CURRENT_TIMESTAMP WHERE id = ?", tuple(params))
+        conn.commit()
+    return serialize_branch(get_branch_by_id(branch_id))
 
 
 @app.post("/auth/send-verification")
@@ -980,11 +1928,8 @@ def send_verification(payload: EmailVerificationRequest):
         "Verify your SirKome Bank email",
         f"Your verification code is: {code}\n\nThis code expires in 15 minutes. Enter it to complete your account creation.",
     )
-    smtp_configured = all(
-        os.getenv(name)
-        for name in ("SIRKOME_SMTP_HOST", "SIRKOME_SMTP_USER", "SIRKOME_SMTP_PASS")
-    )
-    if not sent and (smtp_configured or os.getenv("SIRKOME_ENV") == "production"):
+    is_production = (os.getenv("SIRKOME_ENV") or "development").strip().lower() == "production"
+    if not sent and is_production:
         clear_verification_code(normalized_email)
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Unable to send verification email. Check the SMTP configuration.")
     return response
@@ -1153,12 +2098,15 @@ def save_account(payload: SavedAccountRequest, credentials: HTTPAuthorizationCre
             }
 
         created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        insert_sql = "INSERT INTO saved_accounts (user_id, account_number, account_name, created_at) VALUES (?, ?, ?, ?)"
+        if os.getenv("DATABASE_URL"):
+            insert_sql += " RETURNING id"
         cursor = conn.execute(
-            "INSERT INTO saved_accounts (user_id, account_number, account_name, created_at) VALUES (?, ?, ?, ?)",
+            insert_sql,
             (current_user["id"], account_number, safe_name, created_at),
         )
         conn.commit()
-        saved_id = cursor.lastrowid
+        saved_id = cursor.fetchone()[0] if os.getenv("DATABASE_URL") else cursor.lastrowid
         return {
             "id": saved_id,
             "user_id": current_user["id"],
@@ -1198,6 +2146,8 @@ def get_transactions(request: Request, credentials: HTTPAuthorizationCredentials
             "amount": float(row["amount"]),
             "description": row["description"],
             "date": row["date"],
+            "transaction_reference": row["transaction_reference"] if "transaction_reference" in row.keys() else None,
+            "status": row["status"] if "status" in row.keys() else None,
         }
         for row in rows
     ]
@@ -1214,18 +2164,92 @@ def get_transactions(request: Request, credentials: HTTPAuthorizationCredentials
     }
 
 
-@app.get("/admin/users")
-def list_users_for_admin(request: Request, credentials: HTTPAuthorizationCredentials | None = Depends(security), page: int = 1, per_page: int = 10):
-    require_authenticated_admin(credentials)
+@app.get("/customers")
+def list_customers(request: Request, credentials: HTTPAuthorizationCredentials | None = Depends(security), page: int = 1, per_page: int = 20, query: str | None = None, branch_id: int | None = None, status: str | None = None):
+    current_user = require_staff(credentials)
+    context = get_staff_context(current_user)
+    if "view_all_customers" not in context["permissions"] and "view_branch_customers" not in context["permissions"] and "view_assigned_customers" not in context["permissions"] and "view_permitted_customer_profiles" not in context["permissions"]:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Customer listing access required")
 
     page = max(1, page)
     per_page = max(1, min(per_page, 100))
     offset = (page - 1) * per_page
+    conditions = []
+    params = []
+
+    if context["role"] not in {"SUPER_ADMIN", "ADMIN"}:
+        if context["branch_id"] is None:
+            return {"page": page, "per_page": per_page, "total": 0, "pages": 1, "items": []}
+        conditions.append("u.branch_id = ?")
+        params.append(context["branch_id"])
+    if branch_id is not None:
+        if context["role"] not in {"SUPER_ADMIN", "ADMIN"} and branch_id != context["branch_id"]:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Branch scope mismatch")
+        conditions.append("u.branch_id = ?")
+        params.append(branch_id)
+    if status:
+        normalized_status = status.strip().lower()
+        if normalized_status == "active":
+            conditions.append("CAST(u.is_frozen AS INTEGER) = 0")
+        elif normalized_status == "frozen":
+            conditions.append("CAST(u.is_frozen AS INTEGER) = 1")
+        elif normalized_status == "inactive":
+            conditions.append("CAST(u.is_frozen AS INTEGER) = 1")
+        else:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported status filter")
+    if query and query.strip():
+        q = query.strip()
+        conditions.append("(LOWER(u.name) LIKE ? OR LOWER(u.email) LIKE ? OR LOWER(u.phone) LIKE ? OR u.user_id = ? OR u.account_number = ?)")
+        params.extend([f"%{q.lower()}%", f"%{q.lower()}%", f"%{q.lower()}%", q, resolve_account_number(q)])
+
+    where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+    order_clause = "ORDER BY u.id DESC" if bool(status or (query and query.strip())) else "ORDER BY u.name ASC"
+    with get_connection() as conn:
+        total_row = conn.execute(f"SELECT COUNT(*) AS total FROM users AS u {where_clause}", tuple(params)).fetchone()
+        total = int(total_row["total"] if total_row else 0)
+        rows = conn.execute(
+            f"""
+            SELECT
+                u.id,
+                u.user_id,
+                u.name,
+                u.email,
+                u.phone,
+                u.account_number,
+                u.currency,
+                u.is_frozen,
+                u.freeze_reason,
+                u.branch_id,
+                u.address,
+                u.date_of_birth,
+                u.gender,
+                COALESCE(w.wallet_balance, 0.0) AS wallet_balance,
+                w.status AS wallet_status,
+                b.branch_code,
+                b.name AS branch_name
+            FROM users AS u
+            LEFT JOIN wallets AS w ON w.account_number = u.account_number
+            LEFT JOIN branches AS b ON b.id = u.branch_id
+            {where_clause}
+            {order_clause}
+            LIMIT ? OFFSET ?
+            """,
+            (*params, per_page, offset),
+        ).fetchall()
+
+    items = [serialize_customer_summary(row) for row in rows]
+    return {"page": page, "per_page": per_page, "total": total, "pages": max(1, (total + per_page - 1) // per_page), "items": items}
+
+
+@app.get("/customers/{customer_id}")
+def get_customer(customer_id: str, credentials: HTTPAuthorizationCredentials | None = Depends(security)):
+    current_user = require_staff(credentials)
+    context = get_staff_context(current_user)
+    if "view_all_customers" not in context["permissions"] and "view_branch_customers" not in context["permissions"] and "view_assigned_customers" not in context["permissions"] and "view_permitted_customer_profiles" not in context["permissions"]:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Customer access required")
 
     with get_connection() as conn:
-        total_rows = conn.execute("SELECT COUNT(*) AS total FROM users").fetchone()
-        total = int(total_rows["total"] if total_rows else 0)
-        rows = conn.execute(
+        target = conn.execute(
             """
             SELECT
                 u.id,
@@ -1234,51 +2258,221 @@ def list_users_for_admin(request: Request, credentials: HTTPAuthorizationCredent
                 u.email,
                 u.phone,
                 u.account_number,
-                COALESCE(w.wallet_balance, 0.0) AS balance,
                 u.currency,
-                u.is_admin,
                 u.is_frozen,
-                u.freeze_reason
+                u.freeze_reason,
+                u.branch_id,
+                u.address,
+                u.date_of_birth,
+                u.gender,
+                COALESCE(w.wallet_balance, 0.0) AS wallet_balance,
+                w.status AS wallet_status,
+                b.branch_code,
+                b.name AS branch_name
             FROM users AS u
             LEFT JOIN wallets AS w ON w.account_number = u.account_number
-            ORDER BY u.id ASC
-            LIMIT ? OFFSET ?
+            LEFT JOIN branches AS b ON b.id = u.branch_id
+            WHERE u.user_id = ? OR u.email = ? OR u.account_number = ? OR CAST(u.id AS TEXT) = ?
+            LIMIT 1
             """,
-            (per_page, offset),
+            (customer_id, normalize_email(customer_id), resolve_account_number(customer_id), customer_id),
+        ).fetchone()
+    if not target:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Customer not found")
+    if not customer_in_scope(current_user, target):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Customer is outside your branch scope")
+    recent_transactions = []
+    with get_connection() as conn:
+        recent_rows = conn.execute(
+            "SELECT transaction_reference, type, amount, status, description, date FROM transactions WHERE account_number = ? ORDER BY id DESC LIMIT 10",
+            (target["account_number"],),
         ).fetchall()
+    for row in recent_rows:
+        recent_transactions.append({
+            "transaction_reference": row["transaction_reference"],
+            "type": row["type"],
+            "amount": float(row["amount"]),
+            "status": row["status"],
+            "description": row["description"],
+            "date": row["date"],
+        })
+    target = {**dict(target), "recent_transactions": recent_transactions}
+    return serialize_customer_detail(target)
 
-    items = [
-        {
-            "id": row["id"],
-            "user_id": row["user_id"],
-            "name": row["name"],
-            "email": row["email"],
-            "phone": row["phone"],
-            "account_number": row["account_number"],
-            "balance": float(row["balance"]),
-            "currency": row["currency"],
-            "is_admin": bool(row["is_admin"]),
-            "is_frozen": bool(row["is_frozen"]),
-            "freeze_reason": row["freeze_reason"] or None,
-        }
-        for row in rows
-    ]
+
+@app.patch("/customers/{customer_id}")
+def update_customer(customer_id: str, payload: CustomerUpdateRequest, credentials: HTTPAuthorizationCredentials | None = Depends(security)):
+    current_user = require_staff(credentials)
+    context = get_staff_context(current_user)
+    if "manage_customers" not in context["permissions"] and "view_permitted_customer_profiles" not in context["permissions"] and "manage_permitted_customer_accounts" not in context["permissions"]:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Customer profile update access required")
+    with get_connection() as conn:
+        target = conn.execute(
+            "SELECT * FROM users WHERE user_id = ? OR email = ? OR account_number = ? OR CAST(id AS TEXT) = ?",
+            (customer_id, normalize_email(customer_id), resolve_account_number(customer_id), customer_id),
+        ).fetchone()
+        if not target:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Customer not found")
+        target = dict(target)
+        if not customer_in_scope(current_user, target):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Customer is outside your branch scope")
+        if payload.name is not None:
+            if not payload.name.strip():
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Customer name is required")
+            target["name"] = validate_full_name(payload.name, None, None)
+        if payload.email is not None:
+            normalized_email = validate_email_address(payload.email)
+            duplicate = conn.execute("SELECT id FROM users WHERE LOWER(email) = ? AND id <> ?", (normalized_email, target["id"])).fetchone()
+            if duplicate:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="A user with this email already exists")
+            target["email"] = normalized_email
+        if payload.phone is not None:
+            target["phone"] = validate_phone_number(payload.phone)
+        if payload.address is not None:
+            target["address"] = (payload.address or "").strip() or None
+        if payload.date_of_birth is not None:
+            target["date_of_birth"] = validate_date_of_birth(payload.date_of_birth)
+        if payload.gender is not None:
+            target["gender"] = validate_gender(payload.gender)
+        if payload.name is None and payload.email is None and payload.phone is None and payload.address is None and payload.date_of_birth is None and payload.gender is None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No profile fields to update")
+        updates = []
+        params = []
+        for field in ("name", "email", "phone", "address", "date_of_birth", "gender"):
+            if field in {"name", "email", "phone", "address", "date_of_birth", "gender"} and target.get(field) is not None:
+                if field == "name":
+                    updates.append("name = ?")
+                    params.append(target["name"])
+                elif field == "email":
+                    updates.append("email = ?")
+                    params.append(target["email"])
+                elif field == "phone":
+                    updates.append("phone = ?")
+                    params.append(target["phone"])
+                elif field == "address":
+                    updates.append("address = ?")
+                    params.append(target["address"])
+                elif field == "date_of_birth":
+                    updates.append("date_of_birth = ?")
+                    params.append(target["date_of_birth"])
+                elif field == "gender":
+                    updates.append("gender = ?")
+                    params.append(target["gender"])
+        if not updates:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No profile fields to update")
+        params.append(target["id"])
+        conn.execute(f"UPDATE users SET {', '.join(updates)} WHERE id = ?", tuple(params))
+        conn.commit()
+        updated = conn.execute("SELECT * FROM users WHERE id = ?", (target["id"],)).fetchone()
+    updated = dict(updated) if updated is not None else {}
+    updated["branch_id"] = updated.get("branch_id")
+    return get_customer(updated["user_id"], credentials)
+
+
+@app.patch("/customers/{customer_id}/status")
+def update_customer_status(customer_id: str, payload: CustomerStatusRequest, credentials: HTTPAuthorizationCredentials | None = Depends(security)):
+    current_user = require_staff(credentials)
+    context = get_staff_context(current_user)
+    if "manage_customers" not in context["permissions"] and "freeze_accounts" not in context["permissions"]:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Customer status update access required")
+    with get_connection() as conn:
+        target = conn.execute("SELECT * FROM users WHERE user_id = ? OR email = ? OR account_number = ? OR CAST(id AS TEXT) = ?", (customer_id, normalize_email(customer_id), resolve_account_number(customer_id), customer_id)).fetchone()
+        if not target:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Customer not found")
+        if not customer_in_scope(current_user, target):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Customer is outside your branch scope")
+        if target["is_admin"] == 1:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Administrator accounts cannot be frozen or deactivated through customer management")
+        reason = (payload.reason or "").strip()
+        if payload.is_frozen and not reason:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="A freeze reason is required when freezing a customer")
+        conn.execute("UPDATE users SET is_frozen = ?, freeze_reason = ? WHERE id = ?", (bool(payload.is_frozen), reason if payload.is_frozen else "", target["id"]))
+        conn.commit()
+        updated = conn.execute("SELECT * FROM users WHERE id = ?", (target["id"],)).fetchone()
+    if bool(updated["is_frozen"]):
+        return {"status": "FROZEN", "reason": updated["freeze_reason"] or None, "customer": get_customer(updated["user_id"], credentials)}
+    return {"status": "ACTIVE", "reason": None, "customer": get_customer(updated["user_id"], credentials)}
+
+
+@app.patch("/customers/{customer_id}/branch")
+def update_customer_branch(customer_id: str, payload: CustomerBranchRequest, credentials: HTTPAuthorizationCredentials | None = Depends(security)):
+    current_user = require_staff(credentials)
+    context = get_staff_context(current_user)
+    if "manage_customers" not in context["permissions"] and "manage_branch_operations" not in context["permissions"]:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Branch assignment access required")
+    with get_connection() as conn:
+        target = conn.execute("SELECT * FROM users WHERE user_id = ? OR email = ? OR account_number = ? OR CAST(id AS TEXT) = ?", (customer_id, normalize_email(customer_id), resolve_account_number(customer_id), customer_id)).fetchone()
+        if not target:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Customer not found")
+        if context["role"] not in {"SUPER_ADMIN", "ADMIN"} and context["branch_id"] != payload.branch_id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You may only assign customers within your branch")
+        branch = conn.execute("SELECT * FROM branches WHERE id = ?", (payload.branch_id,)).fetchone()
+        if not branch or not bool(branch["is_active"]):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Active branch not found")
+        conn.execute("UPDATE users SET branch_id = ? WHERE id = ?", (payload.branch_id, target["id"]))
+        conn.commit()
+        updated = conn.execute("SELECT * FROM users WHERE id = ?", (target["id"],)).fetchone()
+    return {"user_id": updated["user_id"], "branch": {"id": branch["id"], "code": branch["branch_code"], "name": branch["name"]}}
+
+
+@app.get("/admin/users")
+def list_users_for_admin(request: Request, credentials: HTTPAuthorizationCredentials | None = Depends(security), page: int = 1, per_page: int = 10):
+    require_permission(credentials, "view_all_customers")
 
     if "page" not in request.query_params and "per_page" not in request.query_params:
-        return items
+        with get_connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                    u.id,
+                    u.user_id,
+                    u.name,
+                    u.email,
+                    u.phone,
+                    u.account_number,
+                    COALESCE(w.wallet_balance, 0.0) AS balance,
+                    u.currency,
+                    u.is_admin,
+                    u.is_frozen,
+                    u.freeze_reason
+                FROM users AS u
+                LEFT JOIN wallets AS w ON w.account_number = u.account_number
+                ORDER BY u.id ASC
+                """
+            ).fetchall()
+        return [
+            {
+                "id": row["id"],
+                "user_id": row["user_id"],
+                "name": row["name"],
+                "email": row["email"],
+                "phone": row["phone"],
+                "account_number": row["account_number"],
+                "balance": float(row["balance"]),
+                "currency": row["currency"],
+                "is_admin": bool(row["is_admin"]),
+                "is_frozen": bool(row["is_frozen"]),
+                "freeze_reason": row["freeze_reason"] or None,
+            }
+            for row in rows
+        ]
 
-    return {
-        "page": page,
-        "per_page": per_page,
-        "total": total,
-        "pages": max(1, (total + per_page - 1) // per_page),
-        "items": items,
-    }
+    return list_customers(request, credentials, page=page, per_page=per_page)
+
+
+@app.get("/staff/customers")
+def list_staff_customers(request: Request, credentials: HTTPAuthorizationCredentials | None = Depends(security), page: int = 1, per_page: int = 20, query: str | None = None, branch_id: int | None = None, status: str | None = None):
+    return list_customers(request, credentials, page=page, per_page=per_page, query=query, branch_id=branch_id, status=status)
+
+
+@app.get("/staff/customers/{customer_id}")
+def get_staff_customer(customer_id: str, credentials: HTTPAuthorizationCredentials | None = Depends(security)):
+    return get_customer(customer_id, credentials)
 
 
 @app.patch("/admin/users/{user_identifier}/freeze")
 def freeze_user_for_admin(user_identifier: str, payload: FreezeUserRequest, credentials: HTTPAuthorizationCredentials | None = Depends(security)):
-    require_authenticated_admin(credentials)
+    require_permission(credentials, "freeze_accounts")
 
     with get_connection() as conn:
         target_user = resolve_admin_user(conn, user_identifier)
@@ -1296,7 +2490,7 @@ def freeze_user_for_admin(user_identifier: str, payload: FreezeUserRequest, cred
 
         conn.execute(
             "UPDATE users SET is_frozen = ?, freeze_reason = ? WHERE id = ?",
-            (1 if is_frozen else 0, reason if is_frozen else "", target_user["id"]),
+            (is_frozen, reason if is_frozen else "", target_user["id"]),
         )
         conn.commit()
         target_user = conn.execute("SELECT * FROM users WHERE id = ?", (target_user["id"],)).fetchone()
@@ -1314,7 +2508,7 @@ def freeze_user_for_admin(user_identifier: str, payload: FreezeUserRequest, cred
 
 @app.delete("/admin/users/{user_identifier}")
 def delete_user_for_admin(user_identifier: str, credentials: HTTPAuthorizationCredentials | None = Depends(security)):
-    current_user = require_authenticated_admin(credentials)
+    current_user = require_permission(credentials, "manage_customers")
 
     with get_connection() as conn:
         target_user = resolve_admin_user(conn, user_identifier)
@@ -1433,7 +2627,7 @@ def transfer(payload: TransferRequest, credentials: HTTPAuthorizationCredentials
     if not sender_wallet or not receiver_wallet:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Wallets are not available for this transfer")
 
-    if sender_wallet["wallet_balance"] < payload.amount:
+    if float(sender_wallet["wallet_balance"]) < payload.amount:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Insufficient balance")
 
     idempotency_key = (payload.idempotency_key or "").strip()
@@ -1459,6 +2653,12 @@ def transfer(payload: TransferRequest, credentials: HTTPAuthorizationCredentials
     receipt_id = f"RCP-{uuid.uuid4().hex[:12].upper()}"
     with get_connection() as conn:
         conn.execute("BEGIN IMMEDIATE")
+        locked_sender_wallet = conn.execute(
+            "SELECT wallet_balance FROM wallets WHERE account_number = ?",
+            (sender["account_number"],),
+        ).fetchone()
+        if not locked_sender_wallet or float(locked_sender_wallet["wallet_balance"]) < payload.amount:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Insufficient balance")
         if idempotency_key:
             existing_request = conn.execute(
                 "SELECT * FROM transfer_requests WHERE idempotency_key = ?",

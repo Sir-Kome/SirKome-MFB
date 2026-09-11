@@ -11,7 +11,7 @@ function ValidationMessage({ message }) {
   return message ? <p className="mt-1 text-xs text-rose-600">{message}</p> : null;
 }
 
-function Login() {
+function Login({ staffMode = false }) {
   const navigate = useNavigate();
   const [storyIndex, setStoryIndex] = useState(0);
   const [email, setEmail] = useState('');
@@ -22,9 +22,9 @@ function Login() {
 
   useEffect(() => {
     if (sessionStorage.getItem('sirkome_token')) {
-      navigate('/dashboard');
+      navigate(staffMode ? '/staff/dashboard' : '/dashboard');
     }
-  }, [navigate]);
+  }, [navigate, staffMode]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -51,11 +51,11 @@ function Login() {
     }
 
     try {
-      const response = await api.post('/auth/login', { email, password });
+      const response = await api.post(staffMode ? '/staff/login' : '/auth/login', { email, password });
       const { token, user } = response.data;
       sessionStorage.setItem('sirkome_token', token);
       sessionStorage.setItem('sirkome_user', JSON.stringify(user));
-      navigate('/dashboard');
+      navigate(staffMode ? '/staff/dashboard' : '/dashboard');
     } catch (err) {
       const detail = err.response?.data?.detail;
       const message = detail || (err.message ? `Unable to reach the bank server: ${err.message}` : 'Unable to sign in right now.');
@@ -116,8 +116,8 @@ function Login() {
               <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-cyan-400 to-violet-500 font-semibold text-white">SB</div>
               <div><p className="text-xs uppercase tracking-[0.2em] text-slate-500">Secure banking</p><p className="font-semibold text-slate-900">SirKome Bank</p></div>
             </div>
-            <p className="text-sm font-medium uppercase tracking-[0.3em] text-cyan-600">Welcome back</p>
-            <h2 className="mt-2 text-2xl font-semibold text-slate-900">Sign in to your account</h2>
+            <p className="text-sm font-medium uppercase tracking-[0.3em] text-cyan-600">{staffMode ? 'Staff access' : 'Welcome back'}</p>
+            <h2 className="mt-2 text-2xl font-semibold text-slate-900">{staffMode ? 'Sign in to the staff workspace' : 'Sign in to your account'}</h2>
 
             <label className="mt-6 block text-sm font-medium text-slate-700" htmlFor="email">
               Enter Email <span className="text-rose-500">*</span>
@@ -167,9 +167,11 @@ function Login() {
               {loading ? 'Signing in...' : 'Sign in'}
             </button>
 
-            <p className="mt-4 text-center text-sm text-slate-500">
-              New here? <a href="/register" className="font-medium text-cyan-600">Create an account</a>
-            </p>
+            {!staffMode ? (
+              <p className="mt-4 text-center text-sm text-slate-500">
+                New here? <a href="/register" className="font-medium text-cyan-600">Create an account</a>
+              </p>
+            ) : null}
           </form>
         </div>
       </div>
