@@ -5,6 +5,7 @@ import json
 import os
 import re
 import sqlite3
+import sys
 import time
 import uuid
 from datetime import datetime, timedelta
@@ -1554,7 +1555,51 @@ def create_user_record(name: str, email: str, password: str, phone: str, nin: st
         return conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
 
 
+def should_seed_demo_data() -> bool:
+    explicit_flag = os.getenv("SIRKOME_ENABLE_DEMO_SEED", "").strip().lower()
+    if explicit_flag in {"1", "true", "yes", "on"}:
+        return True
+    if "PYTEST_CURRENT_TEST" in os.environ:
+        return True
+    if "pytest" in sys.modules:
+        return True
+    return False
+
+
+def cleanup_demo_data():
+    if os.getenv("DATABASE_URL"):
+        return
+    with get_connection() as conn:
+        demo_user_emails = {
+            "demo@sirkome.com",
+            "komeisioro+demo@gmail.com",
+            "komeisioro+admin@gmail.com",
+        }
+        cleanup_user_ids = conn.execute(
+            "SELECT id, email, is_admin, account_number FROM users WHERE LOWER(email) IN (?, ?, ?)",
+            tuple(sorted(demo_user_emails)),
+        ).fetchall()
+        for user in cleanup_user_ids:
+            conn.execute(
+                "UPDATE users SET is_frozen = 1, freeze_reason = ? WHERE id = ?",
+                ("Demo/test account deactivated during production cleanup.", user["id"]),
+            )
+            conn.execute(
+                "UPDATE staff_profiles SET is_active = 0, branch_id = NULL, branch_code = NULL, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?",
+                (user["id"],),
+            )
+
+        conn.execute("UPDATE users SET branch_id = NULL WHERE branch_id IS NOT NULL")
+        conn.execute("UPDATE staff_profiles SET branch_id = NULL, branch_code = NULL WHERE branch_id IS NOT NULL")
+        conn.execute("UPDATE transactions SET branch_id = NULL WHERE branch_id IS NOT NULL")
+        conn.execute("DELETE FROM branches")
+        conn.commit()
+
+
 def seed_default_users():
+    if not should_seed_demo_data():
+        return
+
     admin_user = get_user_by_email("admin@sirkome.com")
     if not admin_user:
         admin_user = create_user_record(
@@ -1657,6 +1702,7 @@ else:
     ensure_sqlite_schema_compatibility()
     ensure_user_columns()
     ensure_wallets()
+    cleanup_demo_data()
     seed_default_users()
 
 
